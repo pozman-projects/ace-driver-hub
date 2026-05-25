@@ -1,0 +1,106 @@
+{
+  "project": "ACE Driver Hub",
+  "theme": "Light",
+  "archetype": "Swiss & High-Contrast (Operations Variant)",
+  "colors": {
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surface_secondary": "#F9FAFB",
+    "primary": "#111827",
+    "primary_hover": "#374151",
+    "text_main": "#111827",
+    "text_muted": "#4B5563",
+    "border": "#E5E7EB",
+    "accent_subtle": "#F3F4F6",
+    "status": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6"
+    }
+  },
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "IBM Plex Sans",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-semibold text-gray-900",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-medium text-gray-900",
+      "h3": "text-xl font-medium text-gray-900",
+      "body": "text-base leading-relaxed text-gray-700",
+      "small": "text-sm text-gray-500",
+      "label": "text-xs uppercase tracking-[0.2em] font-semibold text-gray-500"
+    }
+  },
+  "layout": {
+    "spacing": "p-6, p-8, gap-6, gap-8",
+    "container": "max-w-[1600px] mx-auto w-full px-6 lg:px-12",
+    "grid_strategy": "Control Room Grid: grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8",
+    "surface_strategy": "Cards must have bg-white, border border-gray-200, rounded-xl, p-8, shadow-sm."
+  },
+  "components": {
+    "card": "bg-white border border-gray-200 rounded-xl p-6 lg:p-8 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-gray-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left h-full",
+    "card_icon_wrapper": "p-4 bg-gray-50 rounded-lg mb-6 group-hover:bg-gray-900 group-hover:text-white transition-colors duration-300 text-gray-700",
+    "button": "bg-gray-900 text-white hover:bg-gray-800 rounded-lg px-6 py-3 font-medium transition-colors inline-flex items-center justify-center",
+    "header": "bg-white border-b border-gray-200 sticky top-0 z-50 px-6 lg:px-12 py-4 flex items-center justify-between"
+  },
+  "modules": [
+    {
+      "name": "Driver Hub",
+      "icon": "Users",
+      "description": "Driver profiles, contacts, status and master records."
+    },
+    {
+      "name": "Driver Licences",
+      "icon": "IdentificationCard",
+      "description": "Licence expiry tracking, alerts and uploaded licence documents."
+    },
+    {
+      "name": "Driver Truck Rego",
+      "icon": "Truck",
+      "description": "Truck registration tracking and due dates."
+    },
+    {
+      "name": "Driver Insurance",
+      "icon": "ShieldCheck",
+      "description": "Insurance tracking, expiry dates and compliance alerts."
+    },
+    {
+      "name": "ACE Equipment",
+      "icon": "Wrench",
+      "description": "Equipment assigned to drivers and vehicles."
+    },
+    {
+      "name": "ACE Maintenance",
+      "icon": "Toolbox",
+      "description": "Maintenance records, inspections, defects and service history."
+    },
+    {
+      "name": "ACE Tilt Trays",
+      "icon": "Trailer",
+      "description": "Tilt tray register and tray-specific compliance tracking."
+    },
+    {
+      "name": "Driver Start Profile",
+      "icon": "UserPlus",
+      "description": "New driver onboarding workflow and setup process."
+    }
+  ],
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "style": "Regular weight, 32px size for card icons. Install with: yarn add @phosphor-icons/react"
+  },
+  "instructions_to_main_agent": [
+    "Install required dependencies: yarn add @phosphor-icons/react",
+    "Use Shadcn UI for any complex interactive components (tables, dialogs), but rely on raw HTML/Tailwind for the landing page grid and cards to ensure full design control.",
+    "The 8 cards must be displayed prominently on the landing page in a 4-column grid on large screens. Use the 'Control Room Grid' strategy.",
+    "Implement hover effects exactly as specified in components.card to provide that fast, operational feel.",
+    "Do not add generic gradients or bright colors. Stick to the charcoal/black/white palette with gray accents.",
+    "The header should just contain the 'ACE Driver Hub' branding (bold, clean typography) and a user profile/logout section.",
+    "Widescreen optimization is key. Ensure the main container scales well up to 1600px."
+  ],
+  "accessibility": [
+    "All interactive elements MUST include a data-testid attribute.",
+    "Maintain high contrast ratios (use gray-900 for primary text on white).",
+    "Include hover and focus states for all clickable elements."
+  ]
+}

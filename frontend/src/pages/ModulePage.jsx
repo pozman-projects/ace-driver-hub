@@ -1,52 +1,80 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Navigate } from "react-router-dom";
+import { useParams, Navigate, useNavigate, Link } from "react-router-dom";
 import AppHeader from "../components/app/AppHeader";
-import { findModule, humanLabel } from "../lib/modules";
+import DriverSelect from "../components/app/DriverSelect";
+import {
+  findModule,
+  humanLabel,
+  hasDriverRelationship,
+  resolveDriverName,
+} from "../lib/modules";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { Plus, MagnifyingGlass, Trash, X } from "@phosphor-icons/react";
+import { Plus, MagnifyingGlass, Trash, X, ArrowUpRight } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function ModulePage() {
   const { slug } = useParams();
   const mod = findModule(slug);
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [drivers, setDrivers] = useState([]);
+
+  const needsDrivers = mod && (hasDriverRelationship(mod) || mod.slug === "drivers");
 
   useEffect(() => {
     if (!mod) return;
     let active = true;
     setLoading(true);
-    api
-      .get(`/modules/${slug}`)
-      .then((r) => active && setItems(r.data || []))
-      .catch((e) => {
-        if (active) toast.error(formatApiErrorDetail(e?.response?.data?.detail));
+    const calls = [api.get(`/modules/${slug}`)];
+    if (needsDrivers && mod.slug !== "drivers") {
+      calls.push(api.get(`/modules/drivers`));
+    }
+    Promise.allSettled(calls)
+      .then(([itemsRes, driversRes]) => {
+        if (!active) return;
+        if (itemsRes.status === "fulfilled") setItems(itemsRes.value.data || []);
+        if (driversRes && driversRes.status === "fulfilled") setDrivers(driversRes.value.data || []);
+        if (mod.slug === "drivers" && itemsRes.status === "fulfilled") {
+          setDrivers(itemsRes.value.data || []);
+        }
       })
+      .catch((e) => toast.error(formatApiErrorDetail(e?.response?.data?.detail)))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [slug, mod]);
+  }, [slug, mod, needsDrivers]);
+
+  const driversById = useMemo(() => {
+    const m = {};
+    for (const d of drivers) m[d.id] = d;
+    return m;
+  }, [drivers]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
     const q = search.toLowerCase();
-    return items.filter((it) =>
-      Object.values(it).some(
+    return items.filter((it) => {
+      const driverName = resolveDriverName(it, mod, driversById);
+      const haystack = [...Object.values(it), driverName];
+      return haystack.some(
         (v) => v != null && String(v).toLowerCase().includes(q)
-      )
-    );
-  }, [items, search]);
+      );
+    });
+  }, [items, search, mod, driversById]);
 
   const handleCreate = async (payload) => {
     try {
       const { data } = await api.post(`/modules/${slug}`, payload);
       setItems((prev) => [data, ...prev]);
+      // Also keep drivers list in sync if creating a driver
+      if (mod.slug === "drivers") setDrivers((prev) => [data, ...prev]);
       setShowCreate(false);
       toast.success("Record added");
     } catch (e) {
@@ -166,7 +194,13 @@ export default function ModulePage() {
                   >
                     {mod.columns.map((c) => (
                       <td key={c} className="px-6 py-4 text-gray-800">
-                        {item[c] || <span className="text-gray-300">—</span>}
+                        <Cell
+                          column={c}
+                          row={item}
+                          module={mod}
+                          driversById={driversById}
+                          onNavigateDriver={(id) => navigate(`/drivers/${id}`)}
+                        />
                       </td>
                     ))}
                     {canDelete && (
@@ -192,6 +226,7 @@ export default function ModulePage() {
       {showCreate && (
         <CreateDialog
           module={mod}
+          drivers={drivers}
           onClose={() => setShowCreate(false)}
           onSubmit={handleCreate}
         />
@@ -200,7 +235,47 @@ export default function ModulePage() {
   );
 }
 
-function CreateDialog({ module: mod, onClose, onSubmit }) {
+function Cell({ column, row, module: mod, driversById, onNavigateDriver }) {
+  // Virtual driver column — resolve via lookup, render as clickable link to profile.
+  if (column === "driver") {
+    const name = resolveDriverName(row, mod, driversById);
+    const id = row.driver_id;
+    if (!name) return <span className="text-gray-300">—</span>;
+    if (id) {
+      return (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateDriver(id);
+          }}
+          data-testid={`row-driver-link-${row.id}`}
+          className="inline-flex items-center gap-1 text-gray-900 hover:text-gray-700 hover:underline underline-offset-2 transition-colors"
+        >
+          {name}
+          <ArrowUpRight size={12} weight="bold" className="text-gray-400" />
+        </button>
+      );
+    }
+    return <span title="Unlinked legacy record">{name}</span>;
+  }
+  // Driver Hub: clicking the name opens the driver profile
+  if (mod.slug === "drivers" && column === "name") {
+    return (
+      <Link
+        to={`/drivers/${row.id}`}
+        data-testid={`row-driver-link-${row.id}`}
+        className="font-medium text-gray-900 hover:text-gray-700 hover:underline underline-offset-2 transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {row.name}
+      </Link>
+    );
+  }
+  return row[column] || <span className="text-gray-300">—</span>;
+}
+
+function CreateDialog({ module: mod, drivers, onClose, onSubmit }) {
   const [form, setForm] = useState(
     Object.fromEntries(mod.fields.map((f) => [f.key, ""]))
   );
@@ -248,17 +323,27 @@ function CreateDialog({ module: mod, onClose, onSubmit }) {
                 {f.label}
                 {f.required && <span className="text-red-500 ml-1">*</span>}
               </label>
-              <input
-                type={f.type || "text"}
-                required={!!f.required}
-                placeholder={f.placeholder || ""}
-                value={form[f.key]}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, [f.key]: e.target.value }))
-                }
-                data-testid={`create-field-${f.key}`}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 transition-colors"
-              />
+              {f.type === "driver_select" ? (
+                <DriverSelect
+                  value={form[f.key]}
+                  onChange={(id) => setForm((p) => ({ ...p, [f.key]: id }))}
+                  required={!!f.required}
+                  testid={`create-field-${f.key}`}
+                  drivers={drivers}
+                />
+              ) : (
+                <input
+                  type={f.type || "text"}
+                  required={!!f.required}
+                  placeholder={f.placeholder || ""}
+                  value={form[f.key]}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, [f.key]: e.target.value }))
+                  }
+                  data-testid={`create-field-${f.key}`}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 transition-colors"
+                />
+              )}
             </div>
           ))}
 

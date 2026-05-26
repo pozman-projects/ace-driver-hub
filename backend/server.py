@@ -275,6 +275,10 @@ def _classify_expiry(expiry_str: Optional[str], today: datetime, horizon_days: i
 async def compliance_expiring(current=Depends(get_current_user), horizon: int = 30):
     """Return rollup counts + per-record details for licences / truck-rego / insurance."""
     today = datetime.now(timezone.utc)
+    # Build a driver_id -> name lookup so records can show the canonical driver name
+    drivers = await db.drivers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    driver_name_by_id = {d["id"]: d["name"] for d in drivers}
+
     result = {
         "horizon_days": horizon,
         "totals": {"expired": 0, "expiring": 0, "ok": 0, "unknown": 0},
@@ -290,13 +294,20 @@ async def compliance_expiring(current=Depends(get_current_user), horizon: int = 
             per_mod[status] += 1
             result["totals"][status] += 1
             if status in ("expired", "expiring"):
+                # Canonical driver name from driver_id, fallback to legacy text field
+                driver_id = d.get("driver_id")
+                driver_name = driver_name_by_id.get(driver_id) if driver_id else None
+                if not driver_name:
+                    driver_name = d.get("driver_name") or ""
                 result["records"].append({
                     "module": slug,
                     "id": d.get("id"),
                     "status": status,
                     "days_until": days,
                     "expiry_date": d.get("expiry_date"),
-                    "title": d.get("driver_name") or d.get("rego_number") or d.get("policy_number") or "Record",
+                    "driver_id": driver_id,
+                    "driver_name": driver_name,
+                    "title": driver_name or d.get("rego_number") or d.get("policy_number") or "Record",
                     "subtitle": d.get("licence_number") or d.get("rego_number") or d.get("policy_number") or "",
                     "extra": d.get("provider") or d.get("make") or d.get("licence_class") or "",
                 })
@@ -305,6 +316,37 @@ async def compliance_expiring(current=Depends(get_current_user), horizon: int = 
     # Sort records: expired first (most overdue), then expiring soonest
     result["records"].sort(key=lambda r: (0 if r["status"] == "expired" else 1, r["days_until"] if r["days_until"] is not None else 9999))
     return result
+
+
+# ----------- Driver Profile (driver + linked records) -----------
+# Maps each module slug -> field on the record that points back to a driver
+DRIVER_LINK_FIELD = "driver_id"
+DRIVER_LINKED_MODULES = [
+    "licences",
+    "truck-rego",
+    "insurance",
+    "equipment",
+    "maintenance",
+    "tilt-trays",
+    "onboarding",
+]
+
+
+@api_router.get("/drivers/{driver_id}/profile")
+async def driver_profile(driver_id: str, current=Depends(get_current_user)):
+    driver = await db.drivers.find_one({"id": driver_id}, {"_id": 0})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    linked = {}
+    for slug in DRIVER_LINKED_MODULES:
+        coll = db[MODULE_COLLECTIONS[slug]]
+        docs = await coll.find(
+            {DRIVER_LINK_FIELD: driver_id}, {"_id": 0}
+        ).sort("created_at", -1).to_list(500)
+        linked[slug] = docs
+
+    return {"driver": driver, "linked": linked}
 
 
 
@@ -319,9 +361,9 @@ async def seed_sample_data():
     """Seed sample data only when collections are empty."""
     samples = {
         "drivers": [
-            {"name": "James Carter", "phone": "+61 412 555 101", "email": "james.c@ace.com", "licence_number": "NSW-1234567", "status": "Active", "base": "Sydney"},
-            {"name": "Liam O'Brien", "phone": "+61 412 555 102", "email": "liam.o@ace.com", "licence_number": "VIC-2345678", "status": "Active", "base": "Melbourne"},
-            {"name": "Noah Williams", "phone": "+61 412 555 103", "email": "noah.w@ace.com", "licence_number": "QLD-3456789", "status": "On Leave", "base": "Brisbane"},
+            {"name": "James Carter", "driver_number": "DRV-001", "company": "ACE Car Freighters", "phone": "+61 412 555 101", "email": "james.c@ace.com", "licence_number": "NSW-1234567", "status": "Active", "base": "Sydney"},
+            {"name": "Liam O'Brien", "driver_number": "DRV-002", "company": "ACE Car Freighters", "phone": "+61 412 555 102", "email": "liam.o@ace.com", "licence_number": "VIC-2345678", "status": "Active", "base": "Melbourne"},
+            {"name": "Noah Williams", "driver_number": "DRV-003", "company": "ACE Car Freighters", "phone": "+61 412 555 103", "email": "noah.w@ace.com", "licence_number": "QLD-3456789", "status": "On Leave", "base": "Brisbane"},
         ],
         "licences": [
             {"driver_name": "James Carter", "licence_number": "NSW-1234567", "licence_class": "HR", "issue_date": "2022-03-15", "expiry_date": "2027-03-15", "status": "Valid"},
@@ -385,6 +427,48 @@ async def seed_admin():
         )
 
 
+async def backfill_driver_ids():
+    """One-time idempotent backfill: link existing records to a driver by name.
+
+    Only updates records that don't already have a driver_id.
+    """
+    # Enrich seeded drivers with driver_number/company if missing
+    enrichments = {
+        "James Carter": {"driver_number": "DRV-001", "company": "ACE Car Freighters"},
+        "Liam O'Brien": {"driver_number": "DRV-002", "company": "ACE Car Freighters"},
+        "Noah Williams": {"driver_number": "DRV-003", "company": "ACE Car Freighters"},
+    }
+    for name, extra in enrichments.items():
+        for k, v in extra.items():
+            await db.drivers.update_one(
+                {"name": name, k: {"$exists": False}}, {"$set": {k: v}}
+            )
+
+    drivers = await db.drivers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    name_to_id = {d["name"]: d["id"] for d in drivers}
+    if not name_to_id:
+        return
+    mappings = [
+        ("licences", "driver_name"),
+        ("truck_regos", "driver_name"),
+        ("insurances", "driver_name"),
+        ("equipment", "assigned_to"),
+        ("tilt_trays", "driver_assigned"),
+        ("onboarding", "full_name"),
+    ]
+    for coll_name, source_field in mappings:
+        cursor = db[coll_name].find(
+            {"driver_id": {"$exists": False}}, {"_id": 0, "id": 1, source_field: 1}
+        )
+        async for doc in cursor:
+            name = doc.get(source_field)
+            if name and name in name_to_id:
+                await db[coll_name].update_one(
+                    {"id": doc["id"]},
+                    {"$set": {"driver_id": name_to_id[name]}},
+                )
+
+
 @app.on_event("startup")
 async def on_startup():
     await db.users.create_index("email", unique=True)
@@ -392,6 +476,7 @@ async def on_startup():
         await db[coll].create_index("id", unique=True)
     await seed_admin()
     await seed_sample_data()
+    await backfill_driver_ids()
 
 
 # Include router and CORS

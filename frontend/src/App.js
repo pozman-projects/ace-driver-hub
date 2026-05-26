@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import Hub from "./pages/Hub";
 import ModulePage from "./pages/ModulePage";
 import Compliance from "./pages/Compliance";
+import DriverProfile from "./pages/DriverProfile";
 
 function App() {
   return (
@@ -37,6 +38,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Compliance />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/drivers/:driverId"
+              element={
+                <ProtectedRoute>
+                  <DriverProfile />
                 </ProtectedRoute>
               }
             />

@@ -206,7 +206,7 @@ export default function Compliance() {
                   {[
                     "Status",
                     "Module",
-                    "Record",
+                    "Driver",
                     "Reference",
                     "Detail",
                     "Expiry Date",
@@ -246,7 +246,17 @@ export default function Compliance() {
                       {MODULE_LABELS[r.module]}
                     </td>
                     <td className="px-6 py-4 text-gray-900 font-medium">
-                      {r.title}
+                      {r.driver_id ? (
+                        <Link
+                          to={`/drivers/${r.driver_id}`}
+                          data-testid={`compliance-driver-link-${r.id}`}
+                          className="hover:underline underline-offset-2"
+                        >
+                          {r.driver_name || r.title}
+                        </Link>
+                      ) : (
+                        r.driver_name || r.title
+                      )}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
                       {r.subtitle || "—"}

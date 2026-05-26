@@ -45,6 +45,12 @@ Modules:
 - Outfit (display) + IBM Plex Sans (body) typography
 - 100% backend (34/34) + 100% frontend (18/18) test pass
 
+### Iteration 2 — Expiring Soon compliance widget (2026-02-26)
+- New backend endpoint `/api/compliance/expiring` — classifies licences/truck-rego/insurance records by date into expired / expiring (next 30d) / ok with full record breakdown
+- Hub landing now shows a "Compliance · Next 30 Days" widget above the module grid: total at risk, red/amber/green tone, per-module sub-cards
+- New `/compliance` page — full compliance risk view with summary tiles, filter chips (status + module), per-module link cards, sortable at-risk table with "Open" deep-link to each module
+- 100% backend (39/39) + 100% frontend (16/16) test pass
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

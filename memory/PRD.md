@@ -51,6 +51,18 @@ Modules:
 - New `/compliance` page — full compliance risk view with summary tiles, filter chips (status + module), per-module link cards, sortable at-risk table with "Open" deep-link to each module
 - 100% backend (39/39) + 100% frontend (16/16) test pass
 
+### Iteration 3 — Driver-centric relationships (2026-02-26)
+- Backend: added `/api/drivers/{driver_id}/profile` returning the driver + linked records grouped by 7 module slugs (licences, truck-rego, insurance, equipment, maintenance, tilt-trays, onboarding)
+- Backend: seeded drivers enriched with `driver_number` (DRV-001…) and `company` (ACE Car Freighters)
+- Backend: idempotent `backfill_driver_ids()` runs on startup — links existing records to the canonical driver by name
+- Backend: `/api/compliance/expiring` records now include canonical `driver_id` + `driver_name` (with legacy text-field fallback)
+- Frontend: new reusable `DriverSelect` searchable dropdown (shows name + driver number + company + base)
+- Frontend: every Add Record dialog on the 7 linked modules now uses `DriverSelect` for the Driver field; legacy text fields removed
+- Frontend: all module tables now show the canonical driver name in a virtual `driver` column that links to the profile
+- Frontend: new `/drivers/:driverId` profile page — driver hero, contact strip, "Linked Records" total, and 7 grouped sections each with count + Open module deep-link
+- Frontend: Compliance page Driver column links each row to the driver profile
+- 100% backend (58/58) + 100% frontend test pass
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

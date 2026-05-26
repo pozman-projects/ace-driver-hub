@@ -247,6 +247,67 @@ async def stats_overview(current=Depends(get_current_user)):
     return out
 
 
+# ----------- Compliance: Expiring Soon -----------
+COMPLIANCE_MODULES = ["licences", "truck-rego", "insurance"]
+
+
+def _classify_expiry(expiry_str: Optional[str], today: datetime, horizon_days: int = 30):
+    """Return ('expired'|'expiring'|'ok'|'unknown', days_until). Negative days => expired."""
+    if not expiry_str:
+        return ("unknown", None)
+    try:
+        # Accept ISO date or datetime
+        d = datetime.fromisoformat(str(expiry_str).replace("Z", "+00:00"))
+    except ValueError:
+        return ("unknown", None)
+    # Normalize to date-only comparison
+    exp_date = d.date() if hasattr(d, "date") else d
+    today_date = today.date()
+    delta = (exp_date - today_date).days
+    if delta < 0:
+        return ("expired", delta)
+    if delta <= horizon_days:
+        return ("expiring", delta)
+    return ("ok", delta)
+
+
+@api_router.get("/compliance/expiring")
+async def compliance_expiring(current=Depends(get_current_user), horizon: int = 30):
+    """Return rollup counts + per-record details for licences / truck-rego / insurance."""
+    today = datetime.now(timezone.utc)
+    result = {
+        "horizon_days": horizon,
+        "totals": {"expired": 0, "expiring": 0, "ok": 0, "unknown": 0},
+        "modules": {},
+        "records": [],  # flat list of expired + expiring across modules
+    }
+    for slug in COMPLIANCE_MODULES:
+        coll = db[MODULE_COLLECTIONS[slug]]
+        docs = await coll.find({}, {"_id": 0}).to_list(2000)
+        per_mod = {"expired": 0, "expiring": 0, "ok": 0, "unknown": 0, "total": len(docs)}
+        for d in docs:
+            status, days = _classify_expiry(d.get("expiry_date"), today, horizon)
+            per_mod[status] += 1
+            result["totals"][status] += 1
+            if status in ("expired", "expiring"):
+                result["records"].append({
+                    "module": slug,
+                    "id": d.get("id"),
+                    "status": status,
+                    "days_until": days,
+                    "expiry_date": d.get("expiry_date"),
+                    "title": d.get("driver_name") or d.get("rego_number") or d.get("policy_number") or "Record",
+                    "subtitle": d.get("licence_number") or d.get("rego_number") or d.get("policy_number") or "",
+                    "extra": d.get("provider") or d.get("make") or d.get("licence_class") or "",
+                })
+        result["modules"][slug] = per_mod
+
+    # Sort records: expired first (most overdue), then expiring soonest
+    result["records"].sort(key=lambda r: (0 if r["status"] == "expired" else 1, r["days_until"] if r["days_until"] is not None else 9999))
+    return result
+
+
+
 # ----------- Health -----------
 @api_router.get("/")
 async def root():

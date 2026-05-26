@@ -240,3 +240,80 @@ class TestRoles:
         item_id = r.json()["id"]
         rd = requests.delete(f"{API}/modules/drivers/{item_id}", headers=manager_headers, timeout=15)
         assert rd.status_code == 200
+
+
+# ---------- Compliance: Expiring Soon (Phase 1 iteration 2) ----------
+class TestComplianceExpiring:
+    def test_requires_auth(self):
+        r = requests.get(f"{API}/compliance/expiring", timeout=15)
+        assert r.status_code == 401
+
+    def test_shape_and_modules(self, admin_headers):
+        r = requests.get(f"{API}/compliance/expiring", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        data = r.json()
+        # Shape
+        for k in ("horizon_days", "totals", "modules", "records"):
+            assert k in data, f"missing top-level key {k}"
+        assert data["horizon_days"] == 30
+        for k in ("expired", "expiring", "ok", "unknown"):
+            assert k in data["totals"]
+            assert isinstance(data["totals"][k], int)
+        for slug in ("licences", "truck-rego", "insurance"):
+            assert slug in data["modules"], f"missing module {slug}"
+            m = data["modules"][slug]
+            for k in ("expired", "expiring", "ok", "unknown", "total"):
+                assert k in m, f"missing {k} in module {slug}"
+                assert isinstance(m[k], int)
+
+    def test_counts_against_seed(self, admin_headers):
+        r = requests.get(f"{API}/compliance/expiring", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        data = r.json()
+        # Seeded baseline: 1 expired licence (Noah QLD 2025-09-20),
+        # 1 expired insurance (James POL-887766 2026-04-30 — past as of Jan 2026? No - future)
+        # Actually James POL expires 2026-04-30, not expired. Per agent context: 2 expired (1 licence + 1 insurance),
+        # 1 expiring within 30d. Be tolerant.
+        assert data["totals"]["expired"] >= 1, f"expected >=1 expired, got {data['totals']}"
+        # All affected modules have at least one at-risk record per problem statement (>=1 in licences and insurance)
+        assert data["modules"]["licences"]["expired"] + data["modules"]["licences"]["expiring"] >= 1
+        # Truck rego currently has no at-risk
+        assert data["modules"]["truck-rego"]["expired"] == 0
+        # records list shape
+        assert isinstance(data["records"], list)
+        for rec in data["records"]:
+            for k in ("module", "id", "status", "days_until", "expiry_date", "title"):
+                assert k in rec, f"missing field {k} in record"
+            assert rec["status"] in ("expired", "expiring")
+            assert rec["module"] in ("licences", "truck-rego", "insurance")
+        # records count == sum(expired + expiring across all modules)
+        expected_len = data["totals"]["expired"] + data["totals"]["expiring"]
+        assert len(data["records"]) == expected_len
+
+    def test_records_sorted_expired_first_then_days(self, admin_headers):
+        r = requests.get(f"{API}/compliance/expiring", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        records = r.json()["records"]
+        if len(records) >= 2:
+            # All expired records must appear before any expiring records
+            seen_expiring = False
+            prev_days = None
+            prev_status = None
+            for rec in records:
+                if rec["status"] == "expiring":
+                    seen_expiring = True
+                else:
+                    assert not seen_expiring, "expired record appeared after expiring (sort broken)"
+                # Within same status, days_until ascending
+                if prev_status == rec["status"] and prev_days is not None and rec["days_until"] is not None:
+                    assert rec["days_until"] >= prev_days, "days_until not ascending within status group"
+                prev_days = rec["days_until"]
+                prev_status = rec["status"]
+
+    def test_horizon_query_param(self, admin_headers):
+        r = requests.get(f"{API}/compliance/expiring?horizon=0", headers=admin_headers, timeout=15)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["horizon_days"] == 0
+        # With horizon=0, expiring bucket should be 0 (anything not expired is ok)
+        assert data["totals"]["expiring"] == 0

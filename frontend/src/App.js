@@ -7,6 +7,7 @@ import ProtectedRoute from "./components/app/ProtectedRoute";
 import Login from "./pages/Login";
 import Hub from "./pages/Hub";
 import ModulePage from "./pages/ModulePage";
+import Compliance from "./pages/Compliance";
 
 function App() {
   return (
@@ -28,6 +29,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ModulePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/compliance"
+              element={
+                <ProtectedRoute>
+                  <Compliance />
                 </ProtectedRoute>
               }
             />

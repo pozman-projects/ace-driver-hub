@@ -1,0 +1,39 @@
+{
+  "summary": "Phase 1 iteration 2 (Compliance / Expiring Soon) verified end-to-end. Backend: 39/39 pytest cases pass (34 regression + 5 new compliance tests: auth-required, response shape, seed counts, sort order, horizon query param). Frontend: 16/16 Playwright flows pass — compliance widget on hub (above grid), correct totals (3 at risk = 2 expired + 1 expiring) with Action Required red tone, 3 per-module sub-cards, click widget -> /compliance, /compliance page renders title/summary tiles/filter chips/per-module link cards/at-risk table, filter chips work (status + module), open links and module links nav to /m/{slug}, back-to-hub works, unauth /compliance redirects to /login.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ace_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(carry-over from iteration_1) Login.jsx setState-in-render warning — wrap auth redirect in useEffect.",
+    "(carry-over from iteration_1) Module count badges briefly show '—' on first hub render — consider skeleton/default 0.",
+    "(Note, not a bug) Current backend 'today' is 26 May 2026, so seed-based counts shift over time: Insurance POL-887766 (exp 2026-04-30) is now expired, Liam licence (exp 2026-06-01) is in 6d, Noah licence (exp 2025-09-20) is 248d expired. Tests are tolerant of date drift via >=1 assertions."
+  ],
+  "critical_code_review_comments": [
+    "Backend /api/compliance/expiring uses date-only comparison via _classify_expiry — correct and timezone-safe.",
+    "Records sort uses tuple (0 if expired else 1, days_until) — verified ascending within group; expired before expiring.",
+    "Frontend ComplianceWidget tone logic correct: red on any expired, amber on expiring, green otherwise; sub-cards mirror this.",
+    "Compliance.jsx filters use useMemo correctly; module + status filters compose properly.",
+    "Hub.jsx uses Promise.allSettled for stats + compliance — good fault tolerance; widget shows '—' while loading.",
+    "Minor enhancement: when records list is empty (all-clear state), the at-risk table empty state copy is good ('No records match this filter. All clear on this slice.')."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ace_backend.py"
+  ],
+  "success_rate": {"backend": "100% (39/39)", "frontend": "100% (16/16)"},
+  "test_credentials": "admin@acedriverhub.com / Admin@123 (seeded). TEST_* test users from iteration_1 still in users collection.",
+  "seed_data_creation": "No new seed data created — used existing iteration_1 seed (licences/truck-rego/insurance). Test users with TEST_ prefix remain.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite extended in /app/backend/tests/test_ace_backend.py — class TestComplianceExpiring covers auth/shape/counts/sort/horizon. Frontend selectors: compliance-widget, compliance-total, compliance-expired, compliance-expiring, compliance-status-label, compliance-sub-{licences|truck-rego|insurance}, compliance-page, compliance-table, compliance-row-{id}, compliance-open-{id}, compliance-module-link-{slug}, filter-status-{all|expired|expiring}, filter-module-{all|licences|truck-rego|insurance}. Header back link selector: [data-testid=header-back]. Today's date in env is May 2026 so expiry-based counts shift — write date-tolerant assertions.",
+  "rca of the issue": "N/A — no failing tests."
+}

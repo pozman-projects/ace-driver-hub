@@ -31,6 +31,15 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
 
 *token.json*
 *credentials.json*
@@ -51,6 +60,16 @@ __pycache__/
 *pyc*
 venv/
 .venv/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
 
 # Development tools
 chainlit.md
@@ -63,6 +82,15 @@ chainlit.md
 
 # Data and databases
 agenthub/agents/youtube/db
+*.sqlite
+*.sqlite3
+*.db
+data/
+mongodb-data/
+
+# Local test artifacts
+test_reports/
+auth_testing.md
 
 # Archive files and large assets
 **/*.zip
@@ -84,3 +112,7 @@ frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/2.pack
 frontend/node_modules/.cache/default-development/4.pack
 frontend/node_modules/.cache/default-development/6.pack
+*.env
+credentials.json
+*.key
+.credentials

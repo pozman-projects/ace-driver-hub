@@ -11,7 +11,7 @@ export default function AppHeader({ showBack = false }) {
   return (
     <header
       data-testid="app-header"
-      className="bg-white border-b border-gray-200 sticky top-0 z-40 px-6 lg:px-12 py-4 flex items-center justify-between"
+      className="bg-white border-b border-gray-200 sticky top-0 z-40 px-6 lg:px-12 py-3 flex items-center justify-between"
     >
       <div className="flex items-center gap-6">
         {showBack && !onHub && (

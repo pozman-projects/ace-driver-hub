@@ -65,27 +65,25 @@ export default function Hub() {
     <div className="min-h-screen bg-white" data-testid="hub-page">
       <AppHeader />
 
-      <main className="max-w-[1600px] mx-auto w-full px-6 lg:px-12 py-10 lg:py-14">
+      <main className="max-w-[1600px] mx-auto w-full px-6 lg:px-12 py-5 lg:py-6">
         {/* Hero / status bar */}
-        <section className="mb-10 lg:mb-14 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+        <section className="mb-5 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-gray-500 mb-3">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-gray-500 mb-2">
               Operations Control Hub
             </div>
-            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-gray-900 leading-[1.02]">
-              Welcome back,
-              <br />
+            <h1 className="font-display text-2xl lg:text-3xl font-semibold tracking-tight text-gray-900 leading-tight">
+              Welcome back,{" "}
               <span className="text-gray-500">
                 {user?.full_name || "Operator"}.
               </span>
             </h1>
-            <p className="mt-4 text-gray-600 max-w-xl leading-relaxed">
+            <p className="mt-1.5 text-sm text-gray-500 max-w-xl leading-snug">
               Select a module to manage drivers, fleet compliance and equipment.
-              All data flows into the unified ACE operations database.
             </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 lg:gap-6 lg:min-w-[420px]">
+          <div className="grid grid-cols-3 gap-3 lg:min-w-[380px]">
             <StatTile label="Drivers" value={stats.drivers ?? 0} loaded={loaded} />
             <StatTile label="Active Licences" value={stats.licences ?? 0} loaded={loaded} />
             <StatTile label="Vehicles" value={stats["truck-rego"] ?? 0} loaded={loaded} />
@@ -93,7 +91,7 @@ export default function Hub() {
         </section>
 
         {/* Status strip */}
-        <section className="mb-8 flex items-center justify-between border-y border-gray-200 py-3 text-xs text-gray-500">
+        <section className="mb-4 flex items-center justify-between border-y border-gray-200 py-2 text-xs text-gray-500">
           <div className="flex items-center gap-3">
             <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             <span className="uppercase tracking-[0.2em]">System Online</span>
@@ -111,7 +109,7 @@ export default function Hub() {
 
         {/* Module grid — Control Room Grid */}
         <section
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
           data-testid="module-grid"
         >
           {MODULES.map((mod, i) => {
@@ -122,36 +120,36 @@ export default function Hub() {
                 key={mod.slug}
                 to={`/m/${mod.slug}`}
                 data-testid={`module-card-${mod.slug}`}
-                className="ace-fade-up bg-white border border-gray-200 rounded-xl p-6 lg:p-7 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-gray-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left h-full"
+                className="ace-fade-up bg-white border border-gray-200 rounded-xl p-4 lg:p-5 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-gray-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left h-full"
                 style={{ animationDelay: `${i * 40}ms` }}
               >
-                <div className="flex items-start justify-between w-full mb-8">
-                  <div className="p-3 bg-gray-50 rounded-lg text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-colors duration-300">
-                    <Icon size={28} weight="regular" />
+                <div className="flex items-start justify-between w-full mb-3">
+                  <div className="p-2.5 bg-gray-50 rounded-lg text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-colors duration-300">
+                    <Icon size={22} weight="regular" />
                   </div>
                   <ArrowUpRight
-                    size={18}
+                    size={16}
                     weight="bold"
                     className="text-gray-300 group-hover:text-gray-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-300"
                   />
                 </div>
 
-                <div className="text-[10px] uppercase tracking-[0.25em] text-gray-400 mb-2">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-gray-400 mb-1">
                   Module 0{i + 1}
                 </div>
-                <h3 className="font-display text-xl font-semibold text-gray-900 leading-tight mb-2">
+                <h3 className="font-display text-base lg:text-lg font-semibold text-gray-900 leading-tight mb-1.5">
                   {mod.title}
                 </h3>
-                <p className="text-sm text-gray-500 leading-relaxed mb-6">
+                <p className="text-xs text-gray-500 leading-snug mb-3 line-clamp-2">
                   {mod.description}
                 </p>
 
-                <div className="mt-auto pt-4 border-t border-gray-100 w-full flex items-center justify-between">
+                <div className="mt-auto pt-3 border-t border-gray-100 w-full flex items-center justify-between">
                   <span className="text-[10px] uppercase tracking-[0.2em] text-gray-400">
                     Records
                   </span>
                   <span
-                    className="font-display text-lg font-semibold text-gray-900"
+                    className="font-display text-base font-semibold text-gray-900"
                     data-testid={`module-count-${mod.slug}`}
                   >
                     {count ?? "—"}
@@ -162,7 +160,7 @@ export default function Hub() {
           })}
         </section>
 
-        <footer className="mt-16 pt-6 border-t border-gray-200 flex items-center justify-between text-xs text-gray-400">
+        <footer className="mt-5 pt-3 border-t border-gray-200 flex items-center justify-between text-[11px] text-gray-400">
           <div className="uppercase tracking-[0.2em]">ACE Driver Hub · v1.0 Prototype</div>
           <div className="uppercase tracking-[0.2em]">Built for transport operations</div>
         </footer>
@@ -173,11 +171,11 @@ export default function Hub() {
 
 function StatTile({ label, value, loaded }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl px-5 py-4">
-      <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-1.5">
+    <div className="bg-white border border-gray-200 rounded-lg px-4 py-2.5">
+      <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-0.5">
         {label}
       </div>
-      <div className="font-display text-2xl font-semibold text-gray-900">
+      <div className="font-display text-xl font-semibold text-gray-900 leading-tight">
         {loaded ? value : "—"}
       </div>
     </div>
@@ -231,42 +229,44 @@ function ComplianceWidget({ data, loaded }) {
     <Link
       to="/compliance"
       data-testid="compliance-widget"
-      className="ace-fade-up mb-10 lg:mb-12 group block bg-white border border-gray-200 rounded-xl p-6 lg:p-8 shadow-sm hover:shadow-lg hover:-translate-y-0.5 hover:border-gray-300 transition-all duration-300"
+      className="ace-fade-up mb-4 group block bg-white border border-gray-200 rounded-xl p-4 lg:p-5 shadow-sm hover:shadow-lg hover:-translate-y-0.5 hover:border-gray-300 transition-all duration-300"
     >
-      <div className="flex flex-col lg:flex-row lg:items-center gap-8 lg:gap-12">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
         {/* Headline */}
-        <div className="flex items-start gap-5 lg:min-w-[280px]">
-          <div className={`p-3 rounded-lg border ${t.badge}`}>
-            <ToneIcon size={28} weight="regular" />
+        <div className="flex items-center gap-3 lg:min-w-[260px]">
+          <div className={`p-2.5 rounded-lg border ${t.badge}`}>
+            <ToneIcon size={22} weight="regular" />
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-gray-500 mb-2 flex items-center gap-2">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-gray-500 mb-1 flex items-center gap-2">
               <span className={`inline-flex h-1.5 w-1.5 rounded-full ${t.dot}`} />
               Compliance · Next 30 Days
             </div>
-            <div className="font-display text-3xl font-semibold text-gray-900 leading-none mb-1">
-              Expiring Soon
-            </div>
-            <div className="text-sm text-gray-500 mt-2" data-testid="compliance-status-label">
-              {loaded ? t.label : "Loading compliance risk…"}
+            <div className="flex items-baseline gap-3">
+              <div className="font-display text-xl font-semibold text-gray-900 leading-none">
+                Expiring Soon
+              </div>
+              <div className="text-xs text-gray-500" data-testid="compliance-status-label">
+                {loaded ? t.label : "Loading…"}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Big total */}
-        <div className="lg:border-l lg:border-gray-200 lg:pl-12 flex items-end gap-6">
+        <div className="lg:border-l lg:border-gray-200 lg:pl-8 flex items-end gap-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-0.5">
               Total At Risk
             </div>
             <div
-              className={`font-display text-5xl lg:text-6xl font-semibold leading-none ${t.number}`}
+              className={`font-display text-3xl lg:text-4xl font-semibold leading-none ${t.number}`}
               data-testid="compliance-total"
             >
               {loaded ? totalAtRisk : "—"}
             </div>
           </div>
-          <div className="pb-1 text-xs text-gray-500 leading-relaxed">
+          <div className="pb-0.5 text-[11px] text-gray-500 leading-tight">
             <div>
               <span className="font-medium text-red-600" data-testid="compliance-expired">
                 {loaded ? expired : 0}
@@ -283,7 +283,7 @@ function ComplianceWidget({ data, loaded }) {
         </div>
 
         {/* Per-module split */}
-        <div className="flex-1 grid grid-cols-3 gap-3 lg:gap-4">
+        <div className="flex-1 grid grid-cols-3 gap-2 lg:gap-3">
           {subModules.map((m) => {
             const mod = modules[m.slug] || { expired: 0, expiring: 0 };
             const sub = (mod.expired || 0) + (mod.expiring || 0);
@@ -294,16 +294,16 @@ function ComplianceWidget({ data, loaded }) {
               <div
                 key={m.slug}
                 data-testid={`compliance-sub-${m.slug}`}
-                className="border border-gray-200 rounded-lg px-4 py-3 group-hover:border-gray-300 transition-colors"
+                className="border border-gray-200 rounded-lg px-3 py-2 group-hover:border-gray-300 transition-colors"
               >
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-1">
                   <span className={`inline-flex h-1.5 w-1.5 rounded-full ${subStyles.dot}`} />
                   <span className="text-[10px] uppercase tracking-[0.2em] text-gray-500">
                     {m.label}
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between">
-                  <span className={`font-display text-2xl font-semibold ${subStyles.number}`}>
+                  <span className={`font-display text-lg font-semibold ${subStyles.number}`}>
                     {loaded ? sub : "—"}
                   </span>
                   <span className="text-[10px] uppercase tracking-[0.2em] text-gray-400">
@@ -316,10 +316,10 @@ function ComplianceWidget({ data, loaded }) {
         </div>
 
         {/* CTA */}
-        <div className="hidden xl:flex items-center text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
+        <div className="hidden xl:flex items-center text-xs text-gray-600 group-hover:text-gray-900 transition-colors">
           View list
           <ArrowUpRight
-            size={16}
+            size={14}
             weight="bold"
             className="ml-1 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"
           />

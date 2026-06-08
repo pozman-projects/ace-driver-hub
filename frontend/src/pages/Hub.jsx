@@ -161,7 +161,12 @@ export default function Hub() {
         </section>
 
         <footer className="mt-5 pt-3 border-t border-gray-200 flex items-center justify-between text-[11px] text-gray-400">
-          <div className="uppercase tracking-[0.2em]">ACE Driver Hub · v1.0 Prototype</div>
+          <div
+            className="uppercase tracking-[0.2em]"
+            data-testid="hub-version-stamp"
+          >
+            ACE Driver Hub · v0.1.1-layout
+          </div>
           <div className="uppercase tracking-[0.2em]">Built for transport operations</div>
         </footer>
       </main>

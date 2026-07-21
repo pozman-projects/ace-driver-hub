@@ -29,6 +29,7 @@ export default function DriverProfile() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [canonical, setCanonical] = useState({ owner: null, vehicle: null, equipment: [], ownerRow: null, vehicleRow: null });
+  const [complianceSummary, setComplianceSummary] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -41,7 +42,8 @@ export default function DriverProfile() {
       api.get(`/owners`),
       api.get(`/vehicles`),
       api.get(`/equipment`),
-    ]).then(([profileR, dorR, dvaR, deaR, oR, vR, eR]) => {
+      api.get(`/compliance/drivers/${driverId}`),
+    ]).then(([profileR, dorR, dvaR, deaR, oR, vR, eR, csR]) => {
       if (!active) return;
       if (profileR.status === "fulfilled") setData(profileR.value.data);
       else if (profileR.reason?.response?.status === 404) setNotFound(true);
@@ -63,6 +65,7 @@ export default function DriverProfile() {
         vehicle: dva ? vehiclesById[dva.vehicle_id] : null,
         equipment: dea.map((a) => ({ assignment: a, item: equipmentById[a.equipment_id] })).filter((x) => x.item),
       });
+      if (csR.status === "fulfilled") setComplianceSummary(csR.value.data);
     }).finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [driverId]);
@@ -177,6 +180,33 @@ export default function DriverProfile() {
           ) : null}
         </section>
 
+        {/* Canonical Compliance Summary (EB-04) */}
+        {complianceSummary && (
+          <section className="mb-6 bg-white border border-slate-200 rounded-xl p-5 shadow-sm" data-testid="driver-compliance-summary">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 mb-1 flex items-center gap-2">
+                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                  Canonical Compliance
+                </div>
+                <div className="font-display text-lg font-semibold text-slate-900">Driver Compliance</div>
+              </div>
+              <ComplianceStatusPill status={complianceSummary.overall_status} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {complianceSummary.components.map((c) => (
+                <div key={c.component} className="border border-slate-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{c.label}</div>
+                    <div className="text-xs text-slate-600 truncate">{c.reason}</div>
+                  </div>
+                  <ComplianceStatusPill status={c.status} compact />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Sections */}
         <section className="space-y-6" data-testid="driver-profile-sections">
           {SECTIONS.map((slug) => (
@@ -265,5 +295,40 @@ function ProfileSection({ slug, rows, loading }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+function ComplianceStatusPill({ status, compact }) {
+  const map = {
+    Compliant: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "Due Soon": "bg-amber-50 text-amber-700 border-amber-200",
+    Expired: "bg-red-50 text-red-700 border-red-200",
+    Missing: "bg-red-50 text-red-700 border-red-200",
+    Incomplete: "bg-slate-100 text-slate-700 border-slate-200",
+    "Under Review": "bg-blue-50 text-blue-700 border-blue-200",
+    "Not Applicable": "bg-slate-50 text-slate-500 border-slate-200",
+    Archived: "bg-slate-100 text-slate-500 border-slate-200",
+  };
+  const dots = {
+    Compliant: "bg-emerald-500",
+    "Due Soon": "bg-amber-500",
+    Expired: "bg-red-500",
+    Missing: "bg-red-500",
+    Incomplete: "bg-slate-400",
+    "Under Review": "bg-blue-500",
+    "Not Applicable": "bg-slate-300",
+    Archived: "bg-slate-400",
+  };
+  const cls = map[status] || map.Incomplete;
+  const dot = dots[status] || dots.Incomplete;
+  return (
+    <span
+      data-testid={`compliance-pill-${status || "Unknown"}`}
+      className={`inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.15em] ${compact ? "px-2 py-0.5" : "px-3 py-1"} rounded-full border ${cls}`}
+    >
+      <span className={`inline-flex h-1.5 w-1.5 rounded-full ${dot}`} />
+      {status || "Unknown"}
+    </span>
   );
 }

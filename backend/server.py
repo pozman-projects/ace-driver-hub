@@ -491,6 +491,15 @@ async def on_startup():
     await rel_ensure_indexes(db)
     await seed_relationships(db)
     await startup_reconciliation(db)
+    # --- EB-04 Canonical Compliance Foundation ---
+    from compliance_records import (
+        ensure_indexes as comp_ensure_indexes,
+        seed_compliance,
+        startup_reconciliation as comp_reconciliation,
+    )
+    await comp_ensure_indexes(db)
+    await seed_compliance(db)
+    await comp_reconciliation(db)
 
 
 # Include router and CORS
@@ -503,6 +512,11 @@ app.include_router(build_registers_router(db, get_current_user))
 # --- EB-03 Relationships router ---
 from relationships import build_relationships_router  # noqa: E402
 app.include_router(build_relationships_router(db, get_current_user))
+
+# --- EB-04 Compliance router ---
+from compliance_records import build_compliance_router  # noqa: E402
+app.include_router(build_compliance_router(db, get_current_user))
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

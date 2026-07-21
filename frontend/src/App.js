@@ -11,6 +11,7 @@ import Compliance from "./pages/Compliance";
 import DriverProfile from "./pages/DriverProfile";
 import RegisterPage from "./pages/RegisterPage";
 import RelationshipPage from "./pages/RelationshipPage";
+import CompliancePage from "./pages/CompliancePage";
 
 function App() {
   return (
@@ -64,6 +65,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <RelationshipPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/compliance/records/:slug"
+              element={
+                <ProtectedRoute>
+                  <CompliancePage />
                 </ProtectedRoute>
               }
             />

@@ -1,8 +1,8 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-03) — staging branch · `dcc-phase2-eb03`
+> **Status:** Phase 2 Foundation Build (EB-04) — staging branch · `dcc-phase2-eb04`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
-> **Previous builds:** EB-01 shell / branding · `dcc-phase2-eb01` · EB-02 registers · `dcc-phase2-eb02`
+> **Previous builds:** EB-01 · `dcc-phase2-eb01` · EB-02 · `dcc-phase2-eb02` · EB-03 · `dcc-phase2-eb03`
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
 surface. Phase 2 builds the canonical foundation registers underneath the
@@ -17,9 +17,10 @@ prototype modules established in Phase 1.
 | Phase 2 Foundation Build             | 🟡 In progress |
 | **EB-01** — App shell / branding / visual frame | ✅ Complete |
 | **EB-02** — Foundation Registers (Drivers, Owners, Vehicles, Equipment) | ✅ Complete |
-| **EB-03** — Assignment & Relationship Layer | ✅ **This build** |
+| **EB-03** — Assignment & Relationship Layer | ✅ Complete |
+| **EB-04** — Canonical Compliance Foundation | ✅ **This build** |
 | ACE spreadsheet import               | ⏳ Not performed |
-| Compliance Intelligence changes      | ⏳ Deferred |
+| File / Document storage              | ⏳ Not performed |
 | Production deployment                | ⏳ Not performed |
 
 ### EB-02 scope (this build)
@@ -143,6 +144,184 @@ Re-running the seeder never duplicates or overwrites data.
 - No ACE spreadsheet import
 - No Compliance Intelligence changes
 - No new integrations (email, SMS, object storage, etc.)
+- No changes to authentication credentials or the 5-role permission model
+- No removal or migration of prototype modules or records
+- No `main` branch changes; no production deployment
+
+---
+
+## EB-04 scope (this build) — Canonical Compliance Foundation
+
+Seven new canonical compliance-record collections that **monitor** the EB-02
+master registers. Compliance records never own driver / vehicle / equipment
+identity — they carry immutable UUID ids (`licence_id`, `registration_id`,
+`policy_id`, `inspection_id`, `defect_id`, `maintenance_task_id`,
+`equipment_compliance_id`) and reference the master record ids only.
+
+### Collections added
+
+| Collection                        | Master ref     | Notes |
+| --------------------------------- | -------------- | ----- |
+| `driver_licences`                 | `driver_id`    | One active primary per driver. |
+| `vehicle_registrations`           | `vehicle_id`   | One current registration per vehicle. |
+| `vehicle_insurance_policies`      | `vehicle_id`   | One current policy per vehicle **per cover type**. |
+| `vehicle_inspections`             | `vehicle_id`   | Retains full history; fails feed vehicle compliance. |
+| `vehicle_defects`                 | `vehicle_id`   | Severity ladder; critical opens block Compliant. |
+| `vehicle_maintenance_tasks`       | `vehicle_id`   | Overdue tasks affect vehicle compliance. |
+| `equipment_compliance_records`    | `equipment_id` | Multiple compliance types per equipment item. |
+
+Every record carries the shared audit fields: `id`, `is_archived`,
+`created_at`, `updated_at`, `created_by`, `updated_by`, `_source`, plus
+optional `legacy_record_id` (compat bridge) and `evidence_document_id`
+placeholder (no file storage in this build).
+
+### Controlled compliance status vocabulary
+
+```
+Compliant · Due Soon · Expired · Missing · Incomplete · Under Review ·
+Not Applicable · Archived
+```
+
+Status is **calculated** by the service layer from `expiry_date` and the
+configurable warning window (env `COMPLIANCE_WARNING_DAYS`, default 30):
+
+- Expired  — expiry before today
+- Due Soon — expiry within warning window
+- Compliant — expiry beyond warning window
+- Missing — a required current/primary record does not exist
+- Archived — record has been soft-deleted
+
+### Worst-Status-Wins severity ordering
+
+```
+Not Applicable   0
+Compliant       10
+Due Soon        20
+Under Review    25
+Incomplete      30
+Missing         40
+Expired         50
+Archived        excluded from active calculations
+```
+
+### Summary endpoints
+
+```
+GET /api/compliance/drivers/{driver_id}     → per-driver summary
+GET /api/compliance/vehicles/{vehicle_id}   → per-vehicle summary
+GET /api/compliance/equipment/{equipment_id}→ per-equipment summary
+GET /api/compliance/overview                → filterable canonical rollup
+```
+
+Each summary returns `overall_status`, `severity`, `components[]`
+(with `record_id`, `reason`, `expiry_date` where relevant),
+`worst_component` and `calculated_at`.
+
+Overview filters: `entity_type` (driver|vehicle|equipment, comma-separated),
+`status`, `due_within_days`, `company_ref`, `include_archived`.
+
+- **Driver summary** currently considers: Primary Driver Licence.
+- **Vehicle summary** considers: Registration, Insurance, Latest Inspection,
+  Open Defects, Overdue Maintenance.
+- **Equipment summary** considers: all current active `equipment_compliance_records`
+  (marked `is_mandatory` when required).
+
+The pre-existing `GET /api/compliance/expiring` legacy endpoint is preserved
+untouched — the frontend exposes it via a "Legacy Prototype" tab on the
+Compliance page.
+
+### CRUD routes added
+
+```
+/api/driver-licences                 GET, POST                (list + create)
+/api/driver-licences/{id}            GET, PUT, DELETE         (archive on DELETE)
+
+/api/vehicle-registrations           GET, POST
+/api/vehicle-registrations/{id}      GET, PUT, DELETE
+
+/api/vehicle-insurance               GET, POST
+/api/vehicle-insurance/{id}          GET, PUT, DELETE
+
+/api/vehicle-inspections             GET, POST
+/api/vehicle-inspections/{id}        GET, PUT, DELETE
+
+/api/vehicle-defects                 GET, POST
+/api/vehicle-defects/{id}            GET, PUT, DELETE
+
+/api/vehicle-maintenance-tasks       GET, POST
+/api/vehicle-maintenance-tasks/{id}  GET, PUT, DELETE
+
+/api/equipment-compliance            GET, POST
+/api/equipment-compliance/{id}       GET, PUT, DELETE
+```
+
+Every list route accepts `?include_archived=true`, plus the relevant master
+filter (`driver_id`, `vehicle_id`, `equipment_id`) and `status`.
+
+DELETE is **soft archive only** (sets `is_archived=true`, status → Archived,
+closes `is_primary` / `is_current` flags where applicable). Admin/Manager
+only.
+
+### Frontend surface
+
+- New `CompliancePage.jsx` at `/compliance/records/{slug}` for all 7 record
+  types — heading, count, search, status filter, due-date filter, archived
+  toggle, role-gated Add / Edit / View / Archive with reusable driver /
+  vehicle / equipment selects.
+- Upgraded `/compliance` page — Canonical / Legacy Prototype tabs.
+  Canonical tab shows entity tiles + status filters + due-within filter +
+  worst-status-wins combined table with worst-component reason.
+- Hub gains a "Canonical Compliance" section between "Relationships &
+  Assignments" and "Legacy Prototype Modules" with 7 tiles and an "Open
+  overview" link.
+- `DriverProfile.jsx` now renders a canonical Driver Compliance card showing
+  overall status + primary licence component.
+- Legacy `/m/{slug}` prototype module routes remain accessible unchanged.
+
+### Legacy compatibility bridge
+
+- Legacy `licences`, `truck_regos`, `insurances`, `equipment`, `tilt_trays`,
+  `maintenance`, `onboarding` collections and their `/api/modules/{slug}`
+  routes are preserved untouched.
+- Every canonical compliance record can carry a `legacy_record_id` pointing
+  back at the originating legacy prototype record.
+- No destructive migration runs on startup. Ambiguous legacy records remain
+  for the future ACE spreadsheet import work — no silent auto-migration.
+
+### Startup reconciliation
+
+`compliance_records.startup_reconciliation()` runs after `ensure_indexes()`:
+
+- Re-classifies status on every active licence / registration / insurance /
+  equipment compliance record from its `expiry_date`.
+- Sweeps scheduled maintenance tasks whose `scheduled_date` is in the past
+  and flips their status to `Overdue`.
+
+The task is fully idempotent — running it repeatedly produces the same
+result.
+
+### Development seed (idempotent, tagged `_source: seed-eb04`)
+
+- 3 primary driver licences (Compliant / Due Soon / Expired)
+- 3 vehicle registrations (Compliant / Due Soon / Expired)
+- 3 vehicle insurance policies
+- 3 vehicle inspections (Pass / Pass with observations / Fail)
+- 2 vehicle defects (Critical Open / Rectified)
+- 3 vehicle maintenance tasks (Scheduled / Overdue / Completed)
+- 4 equipment compliance records (Compliant / Due Soon / Expired / Compliant)
+
+### Tests
+
+- `backend/tests/test_compliance_eb04.py` — 34 new EB-04 tests
+- Full backend suite: **149 / 149 pytest pass** (was 115; zero regression)
+
+### What EB-04 explicitly does **not** change
+
+- No ACE spreadsheet import
+- No file / document storage integration (`evidence_document_id` field is a placeholder)
+- No automated numbering
+- No notification / escalation engine
+- No integrations (Blink, email, SMS, external APIs)
 - No changes to authentication credentials or the 5-role permission model
 - No removal or migration of prototype modules or records
 - No `main` branch changes; no production deployment

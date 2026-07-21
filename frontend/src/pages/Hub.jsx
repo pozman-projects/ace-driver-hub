@@ -193,6 +193,59 @@ export default function Hub() {
           </div>
         </section>
 
+        {/* Canonical Compliance (EB-04) */}
+        <section className="mb-4" data-testid="canonical-compliance-section">
+          <div className="mb-3 flex items-baseline justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                Canonical Compliance
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                Records monitoring master records
+              </span>
+            </div>
+            <Link
+              to="/compliance"
+              data-testid="canonical-compliance-overview-link"
+              className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 uppercase tracking-[0.2em]"
+            >
+              Open overview
+              <ArrowUpRight size={12} weight="bold" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { slug: "driver-licences", title: "Driver Licences", desc: "Primary licence per driver.", icon: IdentificationCard },
+              { slug: "vehicle-registrations", title: "Vehicle Registration", desc: "Current registration per vehicle.", icon: Truck },
+              { slug: "vehicle-insurance", title: "Vehicle Insurance", desc: "Current policy per cover type.", icon: ShieldCheck },
+              { slug: "vehicle-inspections", title: "Vehicle Inspections", desc: "Roadworthy & scheduled inspections.", icon: ShieldCheck },
+              { slug: "vehicle-defects", title: "Vehicle Defects", desc: "Defect register with severity.", icon: Warning },
+              { slug: "vehicle-maintenance-tasks", title: "Vehicle Maintenance", desc: "Scheduled + overdue tasks.", icon: Wrench },
+              { slug: "equipment-compliance", title: "Equipment Compliance", desc: "Cert, inspection, insurance.", icon: Toolbox },
+            ].map((r) => {
+              const Icon = r.icon;
+              return (
+                <Link
+                  key={r.slug}
+                  to={`/compliance/records/${r.slug}`}
+                  data-testid={`compliance-card-${r.slug}`}
+                  className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+                >
+                  <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
+                    <Icon size={20} weight="regular" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-display font-semibold text-slate-900 text-sm leading-tight">{r.title}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{r.desc}</div>
+                  </div>
+                  <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+
         {/* Legacy Prototype section label */}
         <div className="mt-5 mb-3 flex items-baseline justify-between">
           <div className="flex items-center gap-3">
@@ -264,7 +317,7 @@ export default function Hub() {
             className="uppercase tracking-[0.2em] text-slate-500"
             data-testid="hub-version-stamp"
           >
-            DCC · Phase 2 Foundation · EB-03
+            DCC · Phase 2 Foundation · EB-04
           </div>
           <div className="uppercase tracking-[0.2em]">Built for transport operations</div>
         </footer>

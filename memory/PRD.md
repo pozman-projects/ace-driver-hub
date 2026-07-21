@@ -93,19 +93,36 @@ Modules:
 - `DriverProfile.jsx` renders three canonical widgets (Current Owner, Vehicle Assignment, Equipment Assignments) sourced from the new endpoints
 - Backend: **115 / 115 pytest pass** (24 new EB-03 tests)
 
+### Phase 2 · EB-04 Canonical Compliance Foundation (2026-02-28)
+- Seven new canonical compliance collections that monitor EB-02 masters via reference only:
+  - `driver_licences`, `vehicle_registrations`, `vehicle_insurance_policies`,
+  - `vehicle_inspections`, `vehicle_defects`, `vehicle_maintenance_tasks`,
+  - `equipment_compliance_records`
+- Every record uses immutable UUID ids + shared audit + optional `legacy_record_id` bridge + `evidence_document_id` placeholder (no file storage in this build)
+- Controlled status vocabulary calculated by the service layer from `expiry_date` and a configurable `COMPLIANCE_WARNING_DAYS` window (default 30)
+- Worst-Status-Wins severity ladder centralised in `compliance_records.STATUS_SEVERITY`
+- Summary endpoints: `/api/compliance/drivers/{id}`, `/api/compliance/vehicles/{id}`, `/api/compliance/equipment/{id}`, `/api/compliance/overview` (filters: entity_type, status, due_within_days, company_ref, include_archived) — each returns overall_status, severity, components with record_id + reason + worst_component
+- Business rules enforced: at most one active primary licence per driver, one current registration per vehicle, one current policy per vehicle per cover type, one current active equipment compliance per (equipment, type); failed inspections and critical open defects and overdue maintenance flow to worst-status
+- Idempotent startup reconciliation re-classifies expiry-based statuses on every boot; overdue maintenance sweep
+- Frontend: generic `CompliancePage.jsx` at `/compliance/records/{slug}` for all 7 types with search / status filter / due-date filter / archived toggle / role-gated Add · Edit · View · Archive
+- `/compliance` upgraded to a Canonical vs Legacy Prototype tabbed view. Canonical tab shows entity tiles + worst-status-wins combined table with reasons. Legacy `/api/compliance/expiring` endpoint preserved untouched.
+- Hub gains "Canonical Compliance" section with 7 tiles + overview link
+- `DriverProfile.jsx` renders a canonical Driver Compliance card fed by `/api/compliance/drivers/{id}`
+- Idempotent EB-04 seed: 3 primary licences (Compliant/Due Soon/Expired), 3 registrations, 3 insurance policies, 3 inspections, 2 defects (Critical open / Rectified), 3 maintenance tasks, 4 equipment compliance records
+- Backend: **149 / 149 pytest pass** (34 new EB-04 tests, zero regression from prior 115)
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)
-- **Compliance Intelligence upgrade** — evolve the existing widget/page to run against the canonical registers + assignments, surface per-driver risk, and expose expiring vehicles / equipment (not only licences).
-- **Document / File storage** — attach documents (licence scans, rego papers, insurance certs, inspection sheets) to canonical records; playbook-driven object storage.
-- **Spreadsheet imports** — ACE-supplied driver / owner / vehicle / equipment spreadsheets → canonical registers with dry-run and validation report.
+- **Document / File storage** — attach documents (licence scans, rego papers, insurance certs, inspection sheets, defect photos) to canonical compliance records via the `evidence_document_id` placeholder already reserved by EB-04; playbook-driven object storage.
+- **Spreadsheet imports** — ACE-supplied driver / owner / vehicle / equipment / compliance spreadsheets → canonical registers with dry-run and validation report, using the `legacy_record_id` bridge added in EB-04.
+- **Notifications / Alerts** — email/SMS alerts for canonical Due Soon and Expired records, using the summary engine as source of truth.
 
 ### P2
 - Automated numbering (auto Driver Code allocation, auto Dispatch Number allocation with reserved-number guard)
 - Final three-row DCC Driver profile interface mock-up (canonical widgets present but layout still compact)
-- Edit/Update dialogs on RelationshipPage (currently: Add, Reassign, View, Archive)
-- CSV export per register / relationship view
-- Audit log surface (who created/updated/archived)
+- Compliance record edit dialogs already present on CompliancePage — add bulk actions and CSV export
+- Audit log surface (who created/updated/archived) across canonical collections
 
 ### P3
 - Mobile responsive driver-facing portal

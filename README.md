@@ -1,17 +1,12 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-01) — staging branch · `dcc-phase2-eb01`
+> **Status:** Phase 2 Foundation Build (EB-02) — staging branch · `dcc-phase2-eb02`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
+> **Previous build:** EB-01 shell / branding · `dcc-phase2-eb01`
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
-surface — a single command hub for drivers, licences, vehicles, equipment,
-maintenance and compliance. Built for transport operations staff who need
-fast, clean, practical access to the data that keeps the fleet moving.
-
-The DCC is the evolution of the Phase 1 **ACE Driver Hub** prototype. The
-same React + FastAPI + MongoDB stack, the same tested APIs, database
-collections and authentication behaviour — with an updated identity and
-visual frame in preparation for Phase 2 business features.
+surface. Phase 2 builds the canonical foundation registers underneath the
+prototype modules established in Phase 1.
 
 ## Phase 2 status
 
@@ -19,21 +14,116 @@ visual frame in preparation for Phase 2 business features.
 | ------------------------------------ | ----------- |
 | Business Blueprint                   | ✅ Complete |
 | Technical Architecture               | ✅ Complete |
-| Phase 2 Foundation Build             | 🟡 Commenced |
-| **EB-01** — App shell / branding / visual frame | ✅ This build |
-| Business logic / DB changes          | ⏳ Not in EB-01 |
+| Phase 2 Foundation Build             | 🟡 In progress |
+| **EB-01** — App shell / branding / visual frame | ✅ Complete |
+| **EB-02** — Foundation Registers (Drivers, Owners, Vehicles, Equipment) | ✅ **This build** |
+| ACE spreadsheet import               | ⏳ Not performed |
+| Compliance Intelligence changes      | ⏳ Deferred |
+| Production deployment                | ⏳ Not performed |
 
-### EB-01 scope (this build)
-- Visible branding renamed **ACE Driver Hub → Driver Command Centre / DCC**
-- New visual frame: dark navy navigation, light-grey page background,
-  white workspace surfaces, teal/cyan operational accents
-- Version stamp `DCC · Phase 2 Foundation · EB-01` on the landing hub
-- `VERSION` file → `dcc-phase2-eb01`
-- **No business logic, API, database schema, route, role or auth changes**
-- Staging branch only — `main` untouched
+### EB-02 scope (this build)
+- Four canonical master registers with UUID string ids and audit fields
+  (`is_archived`, `created_at`, `created_by`, `updated_at`, `updated_by`)
+- New collections: `owners`, `vehicles_register`, `equipment_register`
+- `drivers` collection **shared** with the legacy prototype via an idempotent
+  field-migration adapter (see technical note below)
+- CRUD endpoints under `/api/{drivers|owners|vehicles|equipment}/*`
+- Controlled status vocabularies enforced by Pydantic enums
+- Uniqueness enforced: driver_code, active dispatch_number,
+  registration_number, VIN, equipment_number
+- Reserved dispatch numbers `0` and `13` rejected
+- Cross-register integrity: `owner_id` must reference an existing Owner
+- Role gating unchanged (ReadOnly cannot mutate; only Admin/Manager may archive)
+- **Soft-delete only** — archive sets `is_archived=true` and status → Archived
+- Frontend: four new Foundation Register pages at `/registers/{slug}` with
+  heading, count, search, status filter, table, empty/loading/error states,
+  Add / View / Edit / Archive actions and reusable `OwnerSelect` combobox
+- Landing hub adds a "Foundation Registers" section above "Legacy Prototype
+  Modules" (Phase 1 modules preserved intact)
+- Development-only seed (idempotent): 3 drivers (existing, migrated),
+  2 owners, 3 vehicles, 4 equipment. All non-driver seed rows prefixed `TEST ·`
+  and tagged `_source: seed-eb02`. No real ACE data imported.
 
-Phase 1 Baseline features (all preserved unchanged from `v0.1-phase1-baseline`)
-are listed below.
+### What EB-02 explicitly does **not** change
+- No ACE spreadsheet import
+- No Compliance Intelligence changes
+- No integrations (Blink, email, SMS, object storage, etc.)
+- No changes to authentication credentials or the 5-role permission model
+- No removal of prototype modules, records or routes
+- No `main` branch changes; no production deployment
+
+---
+
+## Technical Note — EB-02 compatibility approach
+
+**Canonical collections**
+
+| Register  | Route                | Mongo collection      | Notes                                                   |
+| --------- | -------------------- | --------------------- | ------------------------------------------------------- |
+| Drivers   | `/api/drivers/*`     | `drivers`             | **Shared** with legacy `/api/modules/drivers`. Migrated. |
+| Owners    | `/api/owners/*`      | `owners`              | New.                                                    |
+| Vehicles  | `/api/vehicles/*`    | `vehicles_register`   | New. Distinct from the legacy `truck_regos` collection. |
+| Equipment | `/api/equipment/*`   | `equipment_register`  | New. Distinct from the legacy `equipment` collection.   |
+
+**Why the split for vehicles & equipment.** The legacy `truck_regos` and
+`equipment` collections model different concerns (rego tracking, kit
+assignments). The canonical registers model *the asset itself* with
+ownership. Keeping them in separate collections avoids shape collisions and
+keeps the prototype API fully backward-compatible.
+
+**Driver migration.** On every startup, `migrate_existing_drivers()` copies
+legacy → canonical fields on any doc missing them:
+
+- `name` → `full_name`
+- `driver_number` → `driver_code`
+- `phone` → `mobile_number`
+- `status` → `driver_status` (mapped to controlled values)
+- `company` → `company_ref`
+- `is_archived` defaulted to `false`
+
+Legacy fields are **not removed**, so `/api/modules/drivers`, the compliance
+lookup and the driver-profile page continue to read the same records. New
+writes via `/api/drivers` update both canonical and legacy mirror fields.
+
+**Seed behaviour.** `seed_registers()` runs on every startup but only inserts
+rows that don't already exist (dedup by `name`, `registration_number`,
+`equipment_number`). Restarting the pod never duplicates seeded data.
+
+**Routes added**
+
+```
+GET    /api/drivers            (extends prior canonical listing)
+POST   /api/drivers
+GET    /api/drivers/{id}       (does not collide with .../profile)
+PUT    /api/drivers/{id}
+DELETE /api/drivers/{id}       (soft delete — sets is_archived + status)
+
+GET    /api/owners
+POST   /api/owners
+GET    /api/owners/{id}
+PUT    /api/owners/{id}
+DELETE /api/owners/{id}
+
+GET    /api/vehicles
+POST   /api/vehicles
+GET    /api/vehicles/{id}
+PUT    /api/vehicles/{id}
+DELETE /api/vehicles/{id}
+
+GET    /api/equipment
+POST   /api/equipment
+GET    /api/equipment/{id}
+PUT    /api/equipment/{id}
+DELETE /api/equipment/{id}
+```
+
+Every list endpoint accepts `?include_archived=true` to include soft-deleted
+records.
+
+**Legacy limitations remaining.** The `driver_id` field on legacy licence /
+truck-rego / insurance / equipment / tilt-tray / maintenance records still
+points at the driver's UUID (unchanged behaviour). Cross-linking legacy
+tracking records to canonical vehicles / equipment is out of scope for EB-02.
 
 ---
 

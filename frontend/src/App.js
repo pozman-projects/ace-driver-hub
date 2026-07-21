@@ -9,6 +9,7 @@ import Hub from "./pages/Hub";
 import ModulePage from "./pages/ModulePage";
 import Compliance from "./pages/Compliance";
 import DriverProfile from "./pages/DriverProfile";
+import RegisterPage from "./pages/RegisterPage";
 
 function App() {
   return (
@@ -46,6 +47,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <DriverProfile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/registers/:slug"
+              element={
+                <ProtectedRoute>
+                  <RegisterPage />
                 </ProtectedRoute>
               }
             />

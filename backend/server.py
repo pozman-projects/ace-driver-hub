@@ -477,10 +477,19 @@ async def on_startup():
     await seed_admin()
     await seed_sample_data()
     await backfill_driver_ids()
+    # --- EB-02 Foundation Registers ---
+    from registers import ensure_indexes, migrate_existing_drivers, seed_registers
+    await ensure_indexes(db)
+    await migrate_existing_drivers(db)
+    await seed_registers(db)
 
 
 # Include router and CORS
 app.include_router(api_router)
+
+# --- EB-02 Foundation Registers router ---
+from registers import build_registers_router  # noqa: E402
+app.include_router(build_registers_router(db, get_current_user))
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

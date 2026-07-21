@@ -108,6 +108,63 @@ export default function Hub() {
         {/* Compliance widget */}
         <ComplianceWidget data={compliance} loaded={loaded} />
 
+        {/* Foundation Registers (EB-02) */}
+        <section className="mb-4" data-testid="foundation-registers-section">
+          <div className="mb-3 flex items-baseline justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                Foundation Registers
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                Canonical master records
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { slug: "drivers", title: "Drivers", desc: "Identity, contact, payroll and status.", icon: Users },
+              { slug: "owners", title: "Owners", desc: "Owners of vehicles and equipment.", icon: IdentificationCard },
+              { slug: "vehicles", title: "Vehicles", desc: "Rego, VIN, ownership and status.", icon: Truck },
+              { slug: "equipment", title: "Equipment", desc: "Trays, trailers and other assets.", icon: Toolbox },
+            ].map((r) => {
+              const Icon = r.icon;
+              return (
+                <Link
+                  key={r.slug}
+                  to={`/registers/${r.slug}`}
+                  data-testid={`register-card-${r.slug}`}
+                  className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+                >
+                  <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
+                    <Icon size={20} weight="regular" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-display font-semibold text-slate-900 text-sm leading-tight">
+                      {r.title}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">{r.desc}</div>
+                  </div>
+                  <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Legacy Prototype section label */}
+        <div className="mt-5 mb-3 flex items-baseline justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] uppercase tracking-[0.25em] text-slate-500 flex items-center gap-2">
+              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-slate-400" />
+              Legacy Prototype Modules
+            </span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+              Preserved from Phase 1
+            </span>
+          </div>
+        </div>
+
         {/* Module grid — Control Room Grid */}
         <section
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
@@ -166,7 +223,7 @@ export default function Hub() {
             className="uppercase tracking-[0.2em] text-slate-500"
             data-testid="hub-version-stamp"
           >
-            DCC · Phase 2 Foundation · EB-01
+            DCC · Phase 2 Foundation · EB-02
           </div>
           <div className="uppercase tracking-[0.2em]">Built for transport operations</div>
         </footer>

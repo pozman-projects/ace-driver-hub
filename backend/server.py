@@ -482,6 +482,15 @@ async def on_startup():
     await ensure_indexes(db)
     await migrate_existing_drivers(db)
     await seed_registers(db)
+    # --- EB-03 Relationships & Assignments ---
+    from relationships import (
+        ensure_indexes as rel_ensure_indexes,
+        seed_relationships,
+        startup_reconciliation,
+    )
+    await rel_ensure_indexes(db)
+    await seed_relationships(db)
+    await startup_reconciliation(db)
 
 
 # Include router and CORS
@@ -490,6 +499,10 @@ app.include_router(api_router)
 # --- EB-02 Foundation Registers router ---
 from registers import build_registers_router  # noqa: E402
 app.include_router(build_registers_router(db, get_current_user))
+
+# --- EB-03 Relationships router ---
+from relationships import build_relationships_router  # noqa: E402
+app.include_router(build_relationships_router(db, get_current_user))
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

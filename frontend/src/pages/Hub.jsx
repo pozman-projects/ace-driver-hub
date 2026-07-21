@@ -152,6 +152,47 @@ export default function Hub() {
           </div>
         </section>
 
+        {/* Relationships & Assignments (EB-03) */}
+        <section className="mb-4" data-testid="relationships-section">
+          <div className="mb-3 flex items-baseline justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                Relationships &amp; Assignments
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                Dated links between master records
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {[
+              { slug: "driver-owner", title: "Driver – Owner", desc: "Current ownership context per driver.", icon: IdentificationCard },
+              { slug: "driver-vehicle", title: "Driver – Vehicle", desc: "Active primary driver per vehicle.", icon: Truck },
+              { slug: "driver-equipment", title: "Driver – Equipment", desc: "Trays / trailers allocation.", icon: Toolbox },
+            ].map((r) => {
+              const Icon = r.icon;
+              return (
+                <Link
+                  key={r.slug}
+                  to={`/relationships/${r.slug}`}
+                  data-testid={`relationship-card-${r.slug}`}
+                  className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+                >
+                  <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
+                    <Icon size={20} weight="regular" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-display font-semibold text-slate-900 text-sm leading-tight">{r.title}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{r.desc}</div>
+                  </div>
+                  <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+
         {/* Legacy Prototype section label */}
         <div className="mt-5 mb-3 flex items-baseline justify-between">
           <div className="flex items-center gap-3">
@@ -223,7 +264,7 @@ export default function Hub() {
             className="uppercase tracking-[0.2em] text-slate-500"
             data-testid="hub-version-stamp"
           >
-            DCC · Phase 2 Foundation · EB-02
+            DCC · Phase 2 Foundation · EB-03
           </div>
           <div className="uppercase tracking-[0.2em]">Built for transport operations</div>
         </footer>

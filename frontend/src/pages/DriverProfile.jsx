@@ -28,24 +28,43 @@ export default function DriverProfile() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [canonical, setCanonical] = useState({ owner: null, vehicle: null, equipment: [], ownerRow: null, vehicleRow: null });
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    api
-      .get(`/drivers/${driverId}/profile`)
-      .then((r) => active && setData(r.data))
-      .catch((e) => {
-        if (e?.response?.status === 404) {
-          if (active) setNotFound(true);
-        } else {
-          toast.error(formatApiErrorDetail(e?.response?.data?.detail));
-        }
-      })
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
+    Promise.allSettled([
+      api.get(`/drivers/${driverId}/profile`),
+      api.get(`/driver-owner-relationships`, { params: { driver_id: driverId, is_current: true } }),
+      api.get(`/driver-vehicle-assignments`, { params: { driver_id: driverId, is_active: true, is_primary: true } }),
+      api.get(`/driver-equipment-assignments`, { params: { driver_id: driverId, is_active: true } }),
+      api.get(`/owners`),
+      api.get(`/vehicles`),
+      api.get(`/equipment`),
+    ]).then(([profileR, dorR, dvaR, deaR, oR, vR, eR]) => {
+      if (!active) return;
+      if (profileR.status === "fulfilled") setData(profileR.value.data);
+      else if (profileR.reason?.response?.status === 404) setNotFound(true);
+      else toast.error(formatApiErrorDetail(profileR.reason?.response?.data?.detail));
+
+      const owners = oR.status === "fulfilled" ? oR.value.data || [] : [];
+      const vehicles = vR.status === "fulfilled" ? vR.value.data || [] : [];
+      const equipment = eR.status === "fulfilled" ? eR.value.data || [] : [];
+      const ownersById = Object.fromEntries(owners.map((o) => [o.id, o]));
+      const vehiclesById = Object.fromEntries(vehicles.map((v) => [v.id, v]));
+      const equipmentById = Object.fromEntries(equipment.map((e) => [e.id, e]));
+      const dor = dorR.status === "fulfilled" ? (dorR.value.data || [])[0] : null;
+      const dva = dvaR.status === "fulfilled" ? (dvaR.value.data || [])[0] : null;
+      const dea = deaR.status === "fulfilled" ? deaR.value.data || [] : [];
+      setCanonical({
+        ownerRow: dor,
+        owner: dor ? ownersById[dor.owner_id] : null,
+        vehicleRow: dva,
+        vehicle: dva ? vehiclesById[dva.vehicle_id] : null,
+        equipment: dea.map((a) => ({ assignment: a, item: equipmentById[a.equipment_id] })).filter((x) => x.item),
+      });
+    }).finally(() => active && setLoading(false));
+    return () => { active = false; };
   }, [driverId]);
 
   if (notFound) return <Navigate to="/m/drivers" replace />;

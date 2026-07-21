@@ -1,15 +1,39 @@
-# ACE Driver Hub
+# Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 1 Baseline · `v0.1-phase1-baseline`
+> **Status:** Phase 2 Foundation Build (EB-01) — staging branch · `dcc-phase2-eb01`
+> **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
 
-Modern transport operations control hub for **ACE Car Freighters**. A single
-operational dashboard for drivers, licences, vehicles, equipment, maintenance
-and compliance — built for transport operations staff who need fast, clean,
-practical access to the data that keeps the fleet moving.
+The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
+surface — a single command hub for drivers, licences, vehicles, equipment,
+maintenance and compliance. Built for transport operations staff who need
+fast, clean, practical access to the data that keeps the fleet moving.
 
-This repository captures the **Phase 1 Baseline** — a stable, fully tested
-foundation that future iterations will build on (e.g. driver risk scoring,
-notifications, advanced workflows).
+The DCC is the evolution of the Phase 1 **ACE Driver Hub** prototype. The
+same React + FastAPI + MongoDB stack, the same tested APIs, database
+collections and authentication behaviour — with an updated identity and
+visual frame in preparation for Phase 2 business features.
+
+## Phase 2 status
+
+| Milestone                            | State       |
+| ------------------------------------ | ----------- |
+| Business Blueprint                   | ✅ Complete |
+| Technical Architecture               | ✅ Complete |
+| Phase 2 Foundation Build             | 🟡 Commenced |
+| **EB-01** — App shell / branding / visual frame | ✅ This build |
+| Business logic / DB changes          | ⏳ Not in EB-01 |
+
+### EB-01 scope (this build)
+- Visible branding renamed **ACE Driver Hub → Driver Command Centre / DCC**
+- New visual frame: dark navy navigation, light-grey page background,
+  white workspace surfaces, teal/cyan operational accents
+- Version stamp `DCC · Phase 2 Foundation · EB-01` on the landing hub
+- `VERSION` file → `dcc-phase2-eb01`
+- **No business logic, API, database schema, route, role or auth changes**
+- Staging branch only — `main` untouched
+
+Phase 1 Baseline features (all preserved unchanged from `v0.1-phase1-baseline`)
+are listed below.
 
 ---
 

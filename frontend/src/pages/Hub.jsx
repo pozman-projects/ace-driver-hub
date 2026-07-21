@@ -62,23 +62,24 @@ export default function Hub() {
   });
 
   return (
-    <div className="min-h-screen bg-white" data-testid="hub-page">
+    <div className="min-h-screen bg-slate-50" data-testid="hub-page">
       <AppHeader />
 
       <main className="max-w-[1600px] mx-auto w-full px-6 lg:px-12 py-5 lg:py-6">
         {/* Hero / status bar */}
         <section className="mb-5 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-gray-500 mb-2">
-              Operations Control Hub
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500 mb-2 flex items-center gap-2">
+              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+              Driver Command Centre · Ops Console
             </div>
-            <h1 className="font-display text-2xl lg:text-3xl font-semibold tracking-tight text-gray-900 leading-tight">
+            <h1 className="font-display text-2xl lg:text-3xl font-semibold tracking-tight text-slate-900 leading-tight">
               Welcome back,{" "}
-              <span className="text-gray-500">
+              <span className="text-slate-500">
                 {user?.full_name || "Operator"}.
               </span>
             </h1>
-            <p className="mt-1.5 text-sm text-gray-500 max-w-xl leading-snug">
+            <p className="mt-1.5 text-sm text-slate-500 max-w-xl leading-snug">
               Select a module to manage drivers, fleet compliance and equipment.
             </p>
           </div>
@@ -160,12 +161,12 @@ export default function Hub() {
           })}
         </section>
 
-        <footer className="mt-5 pt-3 border-t border-gray-200 flex items-center justify-between text-[11px] text-gray-400">
+        <footer className="mt-5 pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-400">
           <div
-            className="uppercase tracking-[0.2em]"
+            className="uppercase tracking-[0.2em] text-slate-500"
             data-testid="hub-version-stamp"
           >
-            ACE Driver Hub · v0.1.1-layout
+            DCC · Phase 2 Foundation · EB-01
           </div>
           <div className="uppercase tracking-[0.2em]">Built for transport operations</div>
         </footer>

@@ -99,7 +99,7 @@ export default function ModulePage() {
   const canDelete = user && (user.role === "Admin" || user.role === "Manager");
 
   return (
-    <div className="min-h-screen bg-white" data-testid={`module-page-${slug}`}>
+    <div className="min-h-screen bg-slate-50" data-testid={`module-page-${slug}`}>
       <AppHeader showBack />
 
       <main className="max-w-[1600px] mx-auto w-full px-6 lg:px-12 py-10">

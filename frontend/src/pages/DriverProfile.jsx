@@ -58,7 +58,7 @@ export default function DriverProfile() {
   );
 
   return (
-    <div className="min-h-screen bg-white" data-testid="driver-profile-page">
+    <div className="min-h-screen bg-slate-50" data-testid="driver-profile-page">
       <AppHeader showBack />
 
       <main className="max-w-[1600px] mx-auto w-full px-6 lg:px-12 py-10">

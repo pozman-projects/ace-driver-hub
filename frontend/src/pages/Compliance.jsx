@@ -60,7 +60,7 @@ export default function Compliance() {
       : "text-emerald-700 bg-emerald-50 border-emerald-200";
 
   return (
-    <div className="min-h-screen bg-white" data-testid="compliance-page">
+    <div className="min-h-screen bg-slate-50" data-testid="compliance-page">
       <AppHeader showBack />
 
       <main className="max-w-[1600px] mx-auto w-full px-6 lg:px-12 py-10">

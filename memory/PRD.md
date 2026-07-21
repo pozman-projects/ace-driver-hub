@@ -63,21 +63,49 @@ Modules:
 - Frontend: Compliance page Driver column links each row to the driver profile
 - 100% backend (58/58) + 100% frontend test pass
 
+### Phase 2 · EB-01 Shell / Branding (2026-02-27)
+- Rebranded ACE Driver Hub → **Driver Command Centre (DCC)**, navy header, light grey background, DCC monogram, version stamp
+- App shell polish: 1920×1080-first layout, compact typography, top-bar user chip, module cards refit to no-scroll landing
+
+### Phase 2 · EB-02 Foundation Registers (2026-02-27)
+- Four canonical registers (`drivers`, `owners`, `vehicles_register`, `equipment_register`) with UUID ids and audit fields
+- CRUD endpoints under `/api/{drivers|owners|vehicles|equipment}/*` with role gating and controlled status vocabularies
+- Cross-register integrity (`owner_id` must reference an existing Owner), uniqueness enforced for driver_code / dispatch_number / registration_number / VIN / equipment_number
+- Soft-delete only (archive sets `is_archived=true` + status → Archived)
+- Idempotent seeder for 3 drivers (migrated from legacy) + 2 owners + 3 vehicles + 4 equipment
+- Frontend: reusable `RegisterPage.jsx` + `OwnerSelect` combobox mounted at `/registers/{slug}`
+- Hub gains a "Foundation Registers" section above the Legacy Prototype Modules
+- Legacy Phase 1 collections retained side-by-side; driver record migration adapter runs on every boot
+
+### Phase 2 · EB-03 Assignment & Relationship Layer (2026-02-28)
+- Three new canonical collections: `driver_owner_relationships`, `driver_vehicle_assignments`, `driver_equipment_assignments`
+- Single service layer enforces business rules for both HTTP routes and startup reconciliation:
+  - At most one `is_current=true` driver-owner relationship per driver (setting a new one auto-closes any prior current)
+  - At most one active + primary vehicle assignment per driver AND per vehicle (atomic `/reassign` closes both sides)
+  - At most one active equipment assignment per equipment_id (conflict → HTTP 409 unless `/reassign` is used)
+  - Blocked equipment statuses (`Maintenance`, `Inactive`, `Archived`) cannot be freshly assigned
+  - Equipment status auto-syncs between `Available` ↔ `Assigned` on every assignment mutation
+- Full CRUD + `/reassign` endpoints under `/api/driver-owner-relationships`, `/api/driver-vehicle-assignments`, `/api/driver-equipment-assignments` (all role-gated, soft-delete only)
+- Startup reconciliation: logs duplicate-active warnings, re-syncs equipment status against active assignments
+- Idempotent EB-03 seed: 3 current owner links, 3 active + 1 historical vehicle assignments, 3 active + 1 historical equipment assignments
+- Frontend: generic `RelationshipPage.jsx` at `/relationships/{driver-owner|driver-vehicle|driver-equipment}` with search, active/historical filter, archived toggle, role-gated Add / Reassign / View / Archive actions
+- Hub gains "Relationships & Assignments" section between Foundation Registers and Legacy Modules
+- `DriverProfile.jsx` renders three canonical widgets (Current Owner, Vehicle Assignment, Equipment Assignments) sourced from the new endpoints
+- Backend: **115 / 115 pytest pass** (24 new EB-03 tests)
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)
-- Edit/Update flow per row (dialog reusing field config)
-- Driver ↔ Licences / Rego / Insurance / Equipment / Maintenance / Tilt Tray relationships (foreign key by driver id)
-- Expiry alert badges (red/amber/green) on Licences, Insurance, Rego, Maintenance
-- User management page (Admin only) — list users, create new user with role
-- Onboarding multi-stage workflow (status board: Documents → Induction → Active)
+- **Compliance Intelligence upgrade** — evolve the existing widget/page to run against the canonical registers + assignments, surface per-driver risk, and expose expiring vehicles / equipment (not only licences).
+- **Document / File storage** — attach documents (licence scans, rego papers, insurance certs, inspection sheets) to canonical records; playbook-driven object storage.
+- **Spreadsheet imports** — ACE-supplied driver / owner / vehicle / equipment spreadsheets → canonical registers with dry-run and validation report.
 
 ### P2
-- Document upload per record (S3-compatible object storage)
-- Dashboard widgets: expiring-soon count, defects open, compliance score
-- CSV export per module
-- Audit log (who created/updated/deleted)
-- Email alerts for expiring licences/rego/insurance
+- Automated numbering (auto Driver Code allocation, auto Dispatch Number allocation with reserved-number guard)
+- Final three-row DCC Driver profile interface mock-up (canonical widgets present but layout still compact)
+- Edit/Update dialogs on RelationshipPage (currently: Add, Reassign, View, Archive)
+- CSV export per register / relationship view
+- Audit log surface (who created/updated/archived)
 
 ### P3
 - Mobile responsive driver-facing portal

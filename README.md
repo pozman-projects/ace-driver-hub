@@ -1,8 +1,8 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-02) — staging branch · `dcc-phase2-eb02`
+> **Status:** Phase 2 Foundation Build (EB-03) — staging branch · `dcc-phase2-eb03`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
-> **Previous build:** EB-01 shell / branding · `dcc-phase2-eb01`
+> **Previous builds:** EB-01 shell / branding · `dcc-phase2-eb01` · EB-02 registers · `dcc-phase2-eb02`
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
 surface. Phase 2 builds the canonical foundation registers underneath the
@@ -16,7 +16,8 @@ prototype modules established in Phase 1.
 | Technical Architecture               | ✅ Complete |
 | Phase 2 Foundation Build             | 🟡 In progress |
 | **EB-01** — App shell / branding / visual frame | ✅ Complete |
-| **EB-02** — Foundation Registers (Drivers, Owners, Vehicles, Equipment) | ✅ **This build** |
+| **EB-02** — Foundation Registers (Drivers, Owners, Vehicles, Equipment) | ✅ Complete |
+| **EB-03** — Assignment & Relationship Layer | ✅ **This build** |
 | ACE spreadsheet import               | ⏳ Not performed |
 | Compliance Intelligence changes      | ⏳ Deferred |
 | Production deployment                | ⏳ Not performed |
@@ -50,6 +51,100 @@ prototype modules established in Phase 1.
 - No integrations (Blink, email, SMS, object storage, etc.)
 - No changes to authentication credentials or the 5-role permission model
 - No removal of prototype modules, records or routes
+- No `main` branch changes; no production deployment
+
+---
+
+## EB-03 scope (this build) — Assignment & Relationship Layer
+
+Three canonical relationship / assignment collections sit on top of the EB-02
+registers. All are UUID-id, audit-fielded, soft-delete, and enforce their
+uniqueness / cascade rules through a single service layer that is called by
+both the HTTP routes and the startup reconciliation task — so business rules
+live in exactly one place.
+
+| Collection | Purpose | Key rules |
+| ---------- | ------- | --------- |
+| `driver_owner_relationships` | Which owner is the driver operating for (Company / Contractor / Self / Relief) | At most **one `is_current=true`** relationship per driver. Setting a new one auto-closes any prior current with an `end_date`. |
+| `driver_vehicle_assignments` | Which driver is presently allocated to which vehicle | At most **one active + primary** assignment **per driver** and **per vehicle**. `display_on_dispatch=true` requires an active assignment on an unarchived driver + Active vehicle. Reassignment atomically closes both the outgoing driver's and the incoming vehicle's active-primary rows before creating the new one. |
+| `driver_equipment_assignments` | Which driver holds which piece of ACE equipment | At most **one active** assignment per equipment_id. Creating a second active on the same equipment returns HTTP 409 unless the caller uses the `/reassign` endpoint. Assigning to equipment whose status is `Maintenance / Inactive / Archived` is rejected. |
+
+### Equipment status synchronisation
+
+Every equipment assignment mutation triggers `sync_equipment_status_after_change`:
+
+- If the equipment has an active assignment and its status is `Available` → set to `Assigned`.
+- If the equipment has no active assignment and its status is `Assigned` → set to `Available`.
+- Blocked statuses (`Maintenance`, `Inactive`, `Archived`) are never overwritten.
+
+### Cascades
+
+- Archiving an assignment always closes the underlying `is_active` / `is_current` flag and stamps `end_date = today`.
+- Archiving a driver / vehicle / equipment record (via the EB-02 register archive) does **not** hard-delete assignments; historical rows remain queryable via `?include_archived=true`.
+
+### Routes added
+
+```
+GET    /api/driver-owner-relationships
+GET    /api/driver-owner-relationships/{id}
+POST   /api/driver-owner-relationships
+PUT    /api/driver-owner-relationships/{id}
+DELETE /api/driver-owner-relationships/{id}         (archive)
+
+GET    /api/driver-vehicle-assignments
+GET    /api/driver-vehicle-assignments/{id}
+POST   /api/driver-vehicle-assignments
+POST   /api/driver-vehicle-assignments/reassign     (atomic reassign)
+PUT    /api/driver-vehicle-assignments/{id}
+DELETE /api/driver-vehicle-assignments/{id}         (archive)
+
+GET    /api/driver-equipment-assignments
+GET    /api/driver-equipment-assignments/{id}
+POST   /api/driver-equipment-assignments
+POST   /api/driver-equipment-assignments/reassign   (atomic reassign)
+PUT    /api/driver-equipment-assignments/{id}
+DELETE /api/driver-equipment-assignments/{id}       (archive)
+```
+
+Every list endpoint accepts `?include_archived=true`, and supports
+`driver_id`, plus register-specific filter (`owner_id` / `vehicle_id` /
+`equipment_id`) and status filters (`is_current`, `is_active`, `is_primary`,
+`display_on_dispatch`).
+
+### Frontend surface
+
+- New generic `RelationshipPage.jsx` at `/relationships/{driver-owner|driver-vehicle|driver-equipment}` — heading, count, search, status filter (All / Active-only / Historical-only), `Show archived` toggle, table with lookup labels for driver / owner / vehicle / equipment, and role-gated `Add` / `Reassign` / `View` / `Archive` actions.
+- Hub now shows a "Relationships & Assignments" section between "Foundation Registers" and "Legacy Prototype Modules" so operators can pivot between master-data and relationship views.
+- `DriverProfile.jsx` renders three canonical widgets (Current Owner, Vehicle Assignment, Equipment Assignments) sourced from the new endpoints, alongside the legacy grouped record list.
+
+### Startup reconciliation
+
+`startup_reconciliation()` runs after `ensure_indexes()` on every backend boot:
+
+1. Reports any duplicate active-primary assignments per driver / per vehicle (logged as warnings — never destructive).
+2. Reports any duplicate active assignments per equipment.
+3. Re-syncs `equipment_status` against active assignments for all non-blocked equipment.
+
+### Development seed (idempotent, tagged `_source: seed-eb03`)
+
+- 3 current driver-owner relationships (Company / Contractor / Company)
+- 3 active + 1 historical driver-vehicle assignments
+- 3 active + 1 historical driver-equipment assignments
+
+Re-running the seeder never duplicates or overwrites data.
+
+### Tests
+
+- `backend/tests/test_relationships_eb03.py` — 24 new EB-03 tests
+- Backend suite: **115 / 115 pytest pass** (auth, role gating, EB-02 registers, EB-03 relationships, legacy CRUD, compliance, driver profile, backfill)
+
+### What EB-03 explicitly does **not** change
+
+- No ACE spreadsheet import
+- No Compliance Intelligence changes
+- No new integrations (email, SMS, object storage, etc.)
+- No changes to authentication credentials or the 5-role permission model
+- No removal or migration of prototype modules or records
 - No `main` branch changes; no production deployment
 
 ---

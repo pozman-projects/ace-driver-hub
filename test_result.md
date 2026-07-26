@@ -101,3 +101,78 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Full frontend verification across Phase 2 milestones EB-03 (Assignments & Relationships),
+  EB-04 (Canonical Compliance), EB-05 (Documents & Evidence Library), and EB-06 (Guided
+  Spreadsheet Import Wizard). No feature changes unless required to fix a verified defect.
+
+frontend:
+  - task: "EB-03 Relationships pages (/relationships/driver-owner|driver-vehicle|driver-equipment)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/RelationshipPage.jsx, backend/relationships.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Listing, filter chips (active/historical/archived), Add/Reassign/View/Archive flows require e2e verification"
+  - task: "EB-04 Canonical Compliance (/compliance canonical tab + /compliance/records/{slug})"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Compliance.jsx, frontend/src/pages/CompliancePage.jsx, backend/compliance_records.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Overview tiles, worst-status-wins combined table, per-type CRUD dialogs, status filter, due-window filter"
+  - task: "EB-05 Documents Library (/documents)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/DocumentLibrary.jsx, backend/documents_module.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Upload dialog, preview modal, version history, archive/restore, filters, sensitivity role-gating"
+  - task: "EB-06 Import Centre & Wizard (/imports, /imports/{id})"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/ImportCentre.jsx, frontend/src/pages/ImportWizard.jsx, backend/imports_module.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "End-to-end wizard: Upload → Sheet → Map → Validate → Conflicts → Commit; rollback flow for Admin/Manager"
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 4
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "EB-03 Relationships pages (/relationships/driver-owner|driver-vehicle|driver-equipment)"
+    - "EB-04 Canonical Compliance (/compliance canonical tab + /compliance/records/{slug})"
+    - "EB-05 Documents Library (/documents)"
+    - "EB-06 Import Centre & Wizard (/imports, /imports/{id})"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Fork job resumed at dcc-phase2-eb06 (197/197 backend pytest passing). User requested a
+      full frontend verification pass across EB-03..EB-06 with no feature changes unless fixing
+      a verified defect. Please drive the UI as Admin (admin@acedriverhub.com / Admin@123),
+      exercise every action button, and report defects with reproduction steps.

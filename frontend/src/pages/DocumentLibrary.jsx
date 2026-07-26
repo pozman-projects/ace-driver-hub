@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import AppHeader from "../components/app/AppHeader";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -69,6 +69,7 @@ export default function DocumentLibrary() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [preview, setPreview] = useState(null);
   const [versionsOf, setVersionsOf] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -88,6 +89,21 @@ export default function DocumentLibrary() {
   }, [typeFilter, statusFilter, sensitivityFilter, showArchived]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Deep-link support: /documents?doc=<id> auto-opens the preview modal
+  useEffect(() => {
+    const docId = searchParams.get("doc");
+    if (!docId || loading || !items.length) return;
+    if (preview?.id === docId) return;
+    const target = items.find((d) => d.id === docId);
+    if (target) {
+      setPreview(target);
+      // Clear the query so back-nav doesn't re-open it
+      const next = new URLSearchParams(searchParams);
+      next.delete("doc");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, items, loading, preview, setSearchParams]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items;

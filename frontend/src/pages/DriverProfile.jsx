@@ -180,6 +180,96 @@ export default function DriverProfile() {
           ) : null}
         </section>
 
+        {/* Canonical Relationships & Assignments (EB-03) */}
+        <section className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4" data-testid="driver-canonical-widgets">
+          <CanonicalWidget
+            testid="driver-widget-current-owner"
+            label="Current Owner"
+            emptyLabel="No current owner"
+            openTo="/relationships/driver-owner"
+            loading={loading}
+            active={!!canonical.owner || !!canonical.ownerRow}
+          >
+            {canonical.owner || canonical.ownerRow ? (
+              <>
+                <div className="text-sm font-semibold text-slate-900 truncate">
+                  {canonical.owner?.name || canonical.owner?.trading_name || canonical.ownerRow?.owner_name_snapshot || "—"}
+                </div>
+                {(canonical.owner?.abn || canonical.owner?.owner_code) && (
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {canonical.owner?.owner_code}
+                    {canonical.owner?.owner_code && canonical.owner?.abn && " · "}
+                    {canonical.owner?.abn && `ABN ${canonical.owner.abn}`}
+                  </div>
+                )}
+                {canonical.ownerRow?.effective_from && (
+                  <div className="text-[10px] uppercase tracking-[0.15em] text-slate-400 mt-2">
+                    Since {canonical.ownerRow.effective_from}
+                  </div>
+                )}
+              </>
+            ) : null}
+          </CanonicalWidget>
+
+          <CanonicalWidget
+            testid="driver-widget-vehicle"
+            label="Vehicle Assignment"
+            emptyLabel="No active vehicle assignment"
+            openTo="/relationships/driver-vehicle"
+            loading={loading}
+            active={!!canonical.vehicle || !!canonical.vehicleRow}
+          >
+            {canonical.vehicle || canonical.vehicleRow ? (
+              <>
+                <div className="text-sm font-semibold text-slate-900 truncate">
+                  {canonical.vehicle?.registration_number || canonical.vehicleRow?.vehicle_registration_snapshot || "—"}
+                </div>
+                {(canonical.vehicle?.make || canonical.vehicle?.model) && (
+                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                    {[canonical.vehicle?.make, canonical.vehicle?.model].filter(Boolean).join(" ")}
+                  </div>
+                )}
+                {canonical.vehicleRow?.is_primary && (
+                  <div className="text-[10px] uppercase tracking-[0.15em] text-emerald-700 mt-2 inline-flex items-center gap-1">
+                    <span className="inline-flex h-1 w-1 rounded-full bg-emerald-500" />
+                    Primary
+                  </div>
+                )}
+              </>
+            ) : null}
+          </CanonicalWidget>
+
+          <CanonicalWidget
+            testid="driver-widget-equipment"
+            label="Equipment Assignments"
+            emptyLabel="No active equipment"
+            openTo="/relationships/driver-equipment"
+            loading={loading}
+            active={canonical.equipment.length > 0}
+            count={canonical.equipment.length}
+          >
+            {canonical.equipment.length > 0 && (
+              <ul className="space-y-1.5">
+                {canonical.equipment.slice(0, 3).map(({ assignment, item }) => (
+                  <li key={assignment.id} className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-medium text-slate-900 truncate">
+                      {item?.equipment_number || assignment.equipment_number_snapshot || "—"}
+                    </span>
+                    {item?.equipment_type && (
+                      <span className="text-[10px] uppercase tracking-[0.15em] text-slate-500 truncate">
+                        {item.equipment_type}
+                      </span>
+                    )}
+                  </li>
+                ))}
+                {canonical.equipment.length > 3 && (
+                  <li className="text-[11px] text-slate-500">+ {canonical.equipment.length - 3} more</li>
+                )}
+              </ul>
+            )}
+          </CanonicalWidget>
+        </section>
+
         {/* Canonical Compliance Summary (EB-04) */}
         {complianceSummary && (
           <section className="mb-6 bg-white border border-slate-200 rounded-xl p-5 shadow-sm" data-testid="driver-compliance-summary">
@@ -298,6 +388,50 @@ function ProfileSection({ slug, rows, loading }) {
   );
 }
 
+
+function CanonicalWidget({ testid, label, emptyLabel, openTo, loading, active, count, children }) {
+  return (
+    <div
+      data-testid={testid}
+      className={`relative bg-white border rounded-xl px-5 py-4 shadow-sm transition-colors ${
+        active ? "border-slate-200" : "border-dashed border-slate-200"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500 flex items-center gap-2">
+          <span className={`inline-flex h-1.5 w-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-slate-300"}`} />
+          {label}
+          {typeof count === "number" && (
+            <span
+              className="ml-1 text-[10px] font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5"
+              data-testid={`${testid}-count`}
+            >
+              {count}
+            </span>
+          )}
+        </div>
+        {openTo && (
+          <Link
+            to={openTo}
+            data-testid={`${testid}-open`}
+            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900"
+          >
+            Open <ArrowUpRight size={11} weight="bold" />
+          </Link>
+        )}
+      </div>
+      <div className="min-h-[38px]">
+        {loading ? (
+          <div className="text-xs text-slate-400">Loading…</div>
+        ) : active ? (
+          children
+        ) : (
+          <div className="text-xs text-slate-400" data-testid={`${testid}-empty`}>{emptyLabel}</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ComplianceStatusPill({ status, compact }) {
   const map = {

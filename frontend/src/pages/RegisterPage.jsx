@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Navigate } from "react-router-dom";
+import { useParams, Navigate, Link } from "react-router-dom";
 import AppHeader from "../components/app/AppHeader";
 import OwnerSelect from "../components/app/OwnerSelect";
 import { REGISTERS, statusTone } from "../lib/registers";
@@ -13,6 +13,7 @@ import {
   Eye,
   X,
   Warning,
+  User,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
@@ -229,7 +230,7 @@ export default function RegisterPage() {
                       {c.label}
                     </th>
                   ))}
-                  <th className="text-right px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500 w-28">
+                  <th className="text-right px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500 w-36">
                     Actions
                   </th>
                 </tr>
@@ -262,11 +263,21 @@ export default function RegisterPage() {
                     >
                       {cfg.columns.map((c) => (
                         <td key={c.key} className="px-6 py-3.5">
-                          <Cell col={c} row={row} ownersById={ownersById} />
+                          <Cell col={c} row={row} ownersById={ownersById} slug={slug} />
                         </td>
                       ))}
                       <td className="px-6 py-3.5 text-right">
                         <div className="inline-flex items-center gap-1">
+                          {slug === "drivers" && (
+                            <Link
+                              to={`/drivers/${row.id}`}
+                              title="Open Driver Profile"
+                              data-testid={`register-profile-${row.id}`}
+                              className="p-1.5 rounded-md text-slate-400 hover:text-cyan-700 hover:bg-cyan-50 transition-colors"
+                            >
+                              <User size={16} />
+                            </Link>
+                          )}
                           <IconButton
                             onClick={() => openView(row)}
                             title="View"
@@ -335,7 +346,7 @@ function IconButton({ children, onClick, title, testid, destructive = false }) {
   );
 }
 
-function Cell({ col, row, ownersById }) {
+function Cell({ col, row, ownersById, slug }) {
   const value = row[col.key];
   if (col.type === "status") {
     const tone = statusTone(value);
@@ -357,6 +368,17 @@ function Cell({ col, row, ownersById }) {
     const o = value ? ownersById[value] : null;
     if (!o) return <span className="text-slate-300">—</span>;
     return <span className="text-slate-700">{o.name}</span>;
+  }
+  if (slug === "drivers" && col.key === "full_name" && value) {
+    return (
+      <Link
+        to={`/drivers/${row.id}`}
+        data-testid={`register-name-link-${row.id}`}
+        className="font-medium text-slate-900 hover:text-cyan-700 hover:underline"
+      >
+        {value}
+      </Link>
+    );
   }
   if (col.weight === "primary") {
     return <span className="font-medium text-slate-900">{value || <span className="text-slate-300">—</span>}</span>;

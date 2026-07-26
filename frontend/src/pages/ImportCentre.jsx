@@ -32,7 +32,6 @@ export default function ImportCentre() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openNew, setOpenNew] = useState(false);
-
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -176,6 +175,7 @@ function NewImportDialog({ onClose, onCreated }) {
   const [templates, setTemplates] = useState([]);
   const [domain, setDomain] = useState("drivers");
   const [mode, setMode] = useState("Create and Update");
+  const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -186,7 +186,10 @@ function NewImportDialog({ onClose, onCreated }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const { data } = await api.post("/imports", { target_domain: domain, mode });
+      const payload = { target_domain: domain, mode };
+      const trimmed = description.trim();
+      if (trimmed) payload.description = trimmed;
+      const { data } = await api.post("/imports", payload);
       onCreated(data.id);
     } catch (err) {
       toast.error(formatApiErrorDetail(err?.response?.data?.detail));
@@ -217,6 +220,20 @@ function NewImportDialog({ onClose, onCreated }) {
               className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm bg-white">
               {["Create Only", "Update Existing", "Create and Update", "Reconcile Only"].map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-[0.2em] font-semibold text-slate-500 mb-2">
+              Description <span className="text-slate-400 normal-case tracking-normal">(optional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              data-testid="new-import-description"
+              rows={2}
+              maxLength={500}
+              placeholder="Short note about this import (source workbook, purpose, etc.)"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm bg-white resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500"
+            />
           </div>
           <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 mt-4">
             <button type="button" onClick={onClose} className="text-sm text-slate-600 hover:text-slate-900 px-4 py-2.5">Cancel</button>

@@ -736,6 +736,10 @@ def build_imports_router(db, get_current_user):
             raise HTTPException(status_code=400, detail=f"Unknown target_domain {target}")
         if mode not in [m.value for m in Mode]:
             raise HTTPException(status_code=400, detail=f"Unknown mode {mode}")
+        raw_description = payload.get("description")
+        description = raw_description.strip() if isinstance(raw_description, str) else None
+        if description == "":
+            description = None
         job = {
             "id": str(uuid.uuid4()),
             "target_domain": target,
@@ -744,6 +748,7 @@ def build_imports_router(db, get_current_user):
             "sheet_name": None,
             "mapping_id": None,
             "mode": mode,
+            "description": description,
             "total_rows": 0, "valid_rows": 0, "warning_rows": 0, "error_rows": 0,
             "conflict_rows": 0, "skipped_rows": 0,
             "created_rows": 0, "updated_rows": 0, "unchanged_rows": 0,

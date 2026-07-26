@@ -5,7 +5,7 @@ import DriverSelect from "../components/app/DriverSelect";
 import { COMPLIANCE_TYPES, STATUS_STYLES, STATUS_DOT } from "../lib/compliance";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { Plus, MagnifyingGlass, X, Archive, PencilSimple, Warning } from "@phosphor-icons/react";
+import { Plus, MagnifyingGlass, X, Archive, PencilSimple, Warning, Paperclip } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 function GenericSelect({ items, value, onChange, required, testid, placeholder, labelFor }) {
@@ -243,7 +243,7 @@ export default function CompliancePage() {
                   {cfg.columns.map((c) => (
                     <th key={c.key} className="text-left px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500">{c.label}</th>
                   ))}
-                  <th className="text-right px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500 w-32">Actions</th>
+                  <th className="text-right px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500 w-40">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -262,6 +262,24 @@ export default function CompliancePage() {
                     ))}
                     <td className="px-6 py-3.5 text-right">
                       <div className="inline-flex items-center gap-1">
+                        {row.evidence_document_id ? (
+                          <Link
+                            to={`/documents?doc=${row.evidence_document_id}`}
+                            title="Primary Evidence Document"
+                            data-testid={`compliance-evidence-${row.id}`}
+                            className="p-1.5 rounded-md text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50"
+                          >
+                            <Paperclip size={14} weight="bold" />
+                          </Link>
+                        ) : (
+                          <span
+                            title="No evidence attached"
+                            data-testid={`compliance-evidence-missing-${row.id}`}
+                            className="p-1.5 rounded-md text-slate-300"
+                          >
+                            <Paperclip size={14} />
+                          </span>
+                        )}
                         <button title="View" onClick={() => openView(row)} data-testid={`compliance-view-${row.id}`} className="p-1.5 rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
                           <MagnifyingGlass size={14} />
                         </button>

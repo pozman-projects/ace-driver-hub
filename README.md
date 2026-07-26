@@ -1,8 +1,8 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-04) — staging branch · `dcc-phase2-eb04`
+> **Status:** Phase 2 Foundation Build (EB-05) — staging branch · `dcc-phase2-eb05`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
-> **Previous builds:** EB-01 · `dcc-phase2-eb01` · EB-02 · `dcc-phase2-eb02` · EB-03 · `dcc-phase2-eb03`
+> **Previous builds:** EB-01 · `dcc-phase2-eb01` · EB-02 · `dcc-phase2-eb02` · EB-03 · `dcc-phase2-eb03` · EB-04 · `dcc-phase2-eb04`
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
 surface. Phase 2 builds the canonical foundation registers underneath the
@@ -16,11 +16,12 @@ prototype modules established in Phase 1.
 | Technical Architecture               | ✅ Complete |
 | Phase 2 Foundation Build             | 🟡 In progress |
 | **EB-01** — App shell / branding / visual frame | ✅ Complete |
-| **EB-02** — Foundation Registers (Drivers, Owners, Vehicles, Equipment) | ✅ Complete |
+| **EB-02** — Foundation Registers | ✅ Complete |
 | **EB-03** — Assignment & Relationship Layer | ✅ Complete |
-| **EB-04** — Canonical Compliance Foundation | ✅ **This build** |
+| **EB-04** — Canonical Compliance Foundation | ✅ Complete |
+| **EB-05** — Document Storage & Evidence Architecture | ✅ **This build** |
 | ACE spreadsheet import               | ⏳ Not performed |
-| File / Document storage              | ⏳ Not performed |
+| Notifications / alerts               | ⏳ Not performed |
 | Production deployment                | ⏳ Not performed |
 
 ### EB-02 scope (this build)
@@ -322,6 +323,160 @@ result.
 - No automated numbering
 - No notification / escalation engine
 - No integrations (Blink, email, SMS, external APIs)
+- No changes to authentication credentials or the 5-role permission model
+- No removal or migration of prototype modules or records
+- No `main` branch changes; no production deployment
+
+---
+
+## EB-05 scope (this build) — Document Storage & Evidence Architecture
+
+Canonical secure evidence layer that separates **metadata** (Mongo) from
+**binary content** (filesystem-backed private storage adapter). Every
+document is versioned, links to canonical master / compliance records only
+by id, and is fetched exclusively through authorised, streamed endpoints.
+
+### Collections added
+
+| Collection | Notes |
+| ---------- | ----- |
+| `documents` | Header record with current-version pointer, sensitivity, category, sha256 checksum, storage key. |
+| `document_versions` | Immutable per-version blob metadata. Only one `is_current=true` per document. |
+| `document_links` | Canonical bridge to Drivers, Owners, Vehicles, Equipment and every EB-04 compliance record; supports Evidence / Contract / Identification / Photo / Supporting / Generated Export / Other. |
+| `document_access_events` | Append-only audit trail (Upload · View Metadata · Preview · Download · CreateVersion · Archive · Restore · Link · Unlink · Reject · Approve). |
+
+### Storage abstraction
+
+- Dev mode adapter writes into `${DOCUMENT_STORAGE_PATH:-/app/backend/document_storage}` (outside the web root, private).
+- The API never returns `storage_key` or `storage_provider` in responses.
+- Files are streamed through `GET /api/documents/{id}/download` and `/preview` with `Content-Disposition: attachment` (or `inline` for preview) and `Cache-Control: private, no-store`.
+- A Production-ready adapter interface is prepared (`upload`, `download`, `preview`, `delete`, `exists`, `metadata`, `checksum`). **No external object-storage provider is connected** in this build.
+- The `_malware_scan_status` field is prepared for a future scanning service. **No malware scanner is connected.** Files pass extension + declared-MIME + content-signature + size + non-empty checks before status is set to Active. This limitation is disclosed truthfully; nothing pretends a scanner is running.
+
+### Upload rules
+
+- Allowed extensions: `pdf, jpg, jpeg, png, webp, doc, docx, xls, xlsx, csv`.
+- Default max size: **15 MB** (env `MAX_UPLOAD_BYTES`).
+- Rejected: zero-byte, oversized, unsupported extension, mismatched declared MIME, mismatched content signature.
+- Filenames sanitised (path traversal / control chars stripped).
+- SHA-256 computed while streaming to disk.
+- Duplicate checksum returns a warning (`duplicate_of`, `duplicate_of_title` in response) but does not auto-merge.
+- Failed uploads clean up temporary files — no orphaned metadata or bytes remain.
+
+### Versioning
+
+- New file → version 1, status Active.
+- `POST /api/documents/{id}/versions` creates a new version, closes the prior current with status Superseded, updates the document header pointer + new checksum + size + filename.
+- Old versions remain queryable through `GET /api/documents/{id}/versions` and downloadable through `GET /api/documents/{id}/versions/{version_id}/download`.
+- Existing bytes are never overwritten (sharded storage key: `xx/{document_id}/v{n}.{ext}`).
+
+### Sensitivity defaults
+
+| Document type | Default |
+| ------------- | ------- |
+| Profile Photo | Internal |
+| Driver Licence | Confidential |
+| Vehicle Registration | Internal |
+| Vehicle Insurance | Confidential |
+| Driver Contract | **Restricted** |
+| Driver Pass | Confidential |
+| Vehicle Defect | Internal |
+| Supporting Document | Internal |
+
+Role → sensitivity access table (download / preview):
+
+| Sensitivity | Admin | Manager | Compliance | Allocator | ReadOnly |
+| ----------- | :---: | :-----: | :--------: | :-------: | :------: |
+| Standard      | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Internal      | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Confidential  | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Restricted    | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+- Only Admin / Manager / Allocator / Compliance may upload.
+- Only Admin / Manager may archive / restore.
+- Access history endpoint restricted to Admin / Manager / Compliance.
+
+### Evidence integration
+
+- Every EB-04 compliance record already carried an `evidence_document_id` placeholder. When a document is uploaded / linked as **primary Evidence** for a `DriverLicence`, `VehicleRegistration`, `VehicleInsurancePolicy`, `VehicleInspection`, `VehicleDefect`, `VehicleMaintenanceTask` or `EquipmentCompliance` record, that placeholder is now wired to the `documents.id`.
+- Removing (archiving) that primary link clears the placeholder — no orphan reference remains.
+- Compliance records may still carry unlimited supporting documents through `document_links`.
+- Driver Contract is a supported document type with sensitivity **Restricted**; one primary contract per Driver is enforced through the primary-link uniqueness rule.
+- Driver Pass evidence foundation is in place — the full operational Driver Pass module remains a future milestone.
+- Profile photos flow through the same document architecture. Old profile photos remain as historical versions.
+
+### Routes added
+
+```
+GET    /api/documents                                     list + filters
+POST   /api/documents/upload                              multipart upload
+GET    /api/documents/{id}                                metadata (audits ViewMetadata)
+PUT    /api/documents/{id}                                metadata update
+DELETE /api/documents/{id}                                soft archive (Admin/Manager)
+POST   /api/documents/{id}/restore                        restore (Admin/Manager)
+GET    /api/documents/{id}/download                       stream current version
+GET    /api/documents/{id}/preview                        inline current version (PDF/image)
+
+GET    /api/documents/{id}/versions                       version history
+POST   /api/documents/{id}/versions                       upload new version
+GET    /api/documents/{id}/versions/{vid}                 version metadata
+GET    /api/documents/{id}/versions/{vid}/download        stream a specific version
+GET    /api/documents/{id}/versions/{vid}/preview         inline a specific version
+
+GET    /api/document-links                                filterable link list
+POST   /api/document-links                                create link (auto-clears prior primary)
+DELETE /api/document-links/{id}                           soft archive the link
+
+GET    /api/documents/{id}/access-history                 append-only audit (Admin/Manager/Compliance)
+```
+
+### Frontend surface
+
+- New `/documents` route → **Document Library** (search, type / status / sensitivity filters, archived toggle, upload, per-row preview / download / archive / restore, version history dialog with new-version upload).
+- Hub gains a **Documents & Evidence** section with 3 tiles (Library, Under Review, Archived).
+- Upload dialog supports drag-and-drop, file picker, entity type + entity id lookup for Driver / Vehicle / Equipment, relationship type + primary-evidence toggle, real-time upload progress, and safe error surfacing.
+- Preview modal renders PDFs inside an iframe and images inline through the authenticated preview endpoint (blob URL, no permanent public URL).
+
+### Development seed (idempotent, tagged `_source: seed-eb05`)
+
+- 1 Driver Licence evidence PDF (primary evidence linked to first EB-04 licence)
+- 1 Vehicle Registration evidence PDF
+- 1 Vehicle Insurance evidence PDF
+- 1 Vehicle Inspection PNG
+- 1 Vehicle Defect PNG
+- 1 Equipment Compliance PDF
+- 1 Driver Contract PDF (Restricted)
+- 1 Driver Profile Photo PNG
+
+Each includes a real tiny binary written to the dev storage directory and a
+primary `document_links` row. Restart-safe — the seed is skipped when
+`_source: "seed-eb05"` documents already exist.
+
+### Tests
+
+- `backend/tests/test_documents_eb05.py` — 28 new EB-05 tests (upload validation · versioning · links · evidence integration · download / preview / sensitivity gating · seed idempotency)
+- Full backend suite: **177 / 177 pytest pass** (was 149; zero regression)
+
+### Legacy compatibility
+
+- All legacy prototype modules and their 8 CRUD routes remain untouched.
+- Legacy file paths on prototype records are **not** silently migrated. When ACE spreadsheet import lands in a future build, a reporting helper is planned to identify verifiably matchable dev records; no canonical document is fabricated without a real source file.
+
+### Known limitations (EB-05)
+
+1. **Malware scanning is not connected.** File-signature sniff + extension / MIME cross-check + size checks are enforced, and the `_malware_scan_status` metadata field is reserved for the future scanner. Documents are marked Active immediately after passing local validation.
+2. Dev storage adapter uses the local filesystem inside the container. Files persist across supervisor reloads but are not replicated. Production migration to a private object-storage bucket is a separate future task.
+3. Preview supports PDF and image mime types only. Office documents can be downloaded but not previewed inline.
+4. No electronic signing, expiry automation or OCR / AI extraction — deferred by design.
+
+### What EB-05 explicitly does **not** change
+
+- No ACE spreadsheet import
+- No production object-storage integration
+- No OCR / AI extraction
+- No automated numbering
+- No notification / alerts engine
+- No electronic signing of Driver Contracts
 - No changes to authentication credentials or the 5-role permission model
 - No removal or migration of prototype modules or records
 - No `main` branch changes; no production deployment

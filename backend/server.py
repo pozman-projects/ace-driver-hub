@@ -500,6 +500,13 @@ async def on_startup():
     await comp_ensure_indexes(db)
     await seed_compliance(db)
     await comp_reconciliation(db)
+    # --- EB-05 Documents & Evidence ---
+    from documents_module import (
+        ensure_indexes as doc_ensure_indexes,
+        seed_documents,
+    )
+    await doc_ensure_indexes(db)
+    await seed_documents(db)
 
 
 # Include router and CORS
@@ -516,6 +523,10 @@ app.include_router(build_relationships_router(db, get_current_user))
 # --- EB-04 Compliance router ---
 from compliance_records import build_compliance_router  # noqa: E402
 app.include_router(build_compliance_router(db, get_current_user))
+
+# --- EB-05 Documents router ---
+from documents_module import build_documents_router  # noqa: E402
+app.include_router(build_documents_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

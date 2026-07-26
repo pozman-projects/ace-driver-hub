@@ -12,6 +12,7 @@ import DriverProfile from "./pages/DriverProfile";
 import RegisterPage from "./pages/RegisterPage";
 import RelationshipPage from "./pages/RelationshipPage";
 import CompliancePage from "./pages/CompliancePage";
+import DocumentLibrary from "./pages/DocumentLibrary";
 
 function App() {
   return (
@@ -73,6 +74,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <CompliancePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/documents"
+              element={
+                <ProtectedRoute>
+                  <DocumentLibrary />
                 </ProtectedRoute>
               }
             />

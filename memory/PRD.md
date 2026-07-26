@@ -111,17 +111,32 @@ Modules:
 - Idempotent EB-04 seed: 3 primary licences (Compliant/Due Soon/Expired), 3 registrations, 3 insurance policies, 3 inspections, 2 defects (Critical open / Rectified), 3 maintenance tasks, 4 equipment compliance records
 - Backend: **149 / 149 pytest pass** (34 new EB-04 tests, zero regression from prior 115)
 
+### Phase 2 · EB-05 Document Storage & Evidence Architecture (2026-07-26)
+- Four new canonical collections: `documents`, `document_versions`, `document_links`, `document_access_events` — every id UUID, files versioned, links canonical-only
+- Storage abstraction with local private filesystem adapter (`DOCUMENT_STORAGE_PATH`, default `/app/backend/document_storage`). `storage_key` / `storage_provider` never returned to browser; downloads and previews streamed via authorised endpoints (`Content-Disposition: attachment|inline`, `Cache-Control: private, no-store`)
+- Upload validation: extension allow-list (pdf/jpg/jpeg/png/webp/doc/docx/xls/xlsx/csv), 15 MB default, zero-byte + oversize + mismatched MIME + mismatched content signature rejected, SHA-256 streaming checksum, filename sanitisation, duplicate-checksum warning without auto-merge, orphan-safe failure cleanup
+- Immutable versioning: v1 on upload, new versions supersede previous and update the document pointer; existing bytes never overwritten (sharded storage key)
+- Role/sensitivity gating: Standard/Internal → all roles; Confidential → Admin/Manager/Compliance; Restricted → Admin/Manager. Upload restricted to Admin/Manager/Allocator/Compliance; archive/restore Admin/Manager only; access history Admin/Manager/Compliance
+- Evidence integration: primary Evidence links to `DriverLicence`, `VehicleRegistration`, `VehicleInsurancePolicy`, `VehicleInspection`, `VehicleDefect`, `VehicleMaintenanceTask`, `EquipmentCompliance` records now populate the `evidence_document_id` placeholder introduced by EB-04. Removing the primary link clears it. Additional supporting documents flow through `document_links`
+- Append-only `document_access_events` records Upload · Preview · Download · CreateVersion · Archive · Restore · Link · Unlink (Success/Denied/Failed) with IP + UA
+- Frontend: new `/documents` Document Library with search / type / status / sensitivity filters, archived toggle, upload dialog (drag-and-drop, entity picker, primary-evidence flag, live progress), preview modal (PDF/image inline blob URL), version history dialog with new-version upload; Hub gains "Documents & Evidence" section with 3 tiles (Library, Under Review, Archived)
+- Malware scanning **not connected** — `_malware_scan_status` field reserved for future scanner; content signature + extension + MIME + size validation gate `Active` status. Limitation stated truthfully in README.
+- Idempotent EB-05 seed: 1 licence PDF, 1 registration PDF, 1 insurance PDF, 1 inspection PNG, 1 defect PNG, 1 equipment cert PDF, 1 Driver Contract PDF (Restricted), 1 profile photo PNG
+- Backend: **177 / 177 pytest pass** (28 new EB-05 tests, zero regression from prior 149)
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)
-- **Document / File storage** — attach documents (licence scans, rego papers, insurance certs, inspection sheets, defect photos) to canonical compliance records via the `evidence_document_id` placeholder already reserved by EB-04; playbook-driven object storage.
-- **Spreadsheet imports** — ACE-supplied driver / owner / vehicle / equipment / compliance spreadsheets → canonical registers with dry-run and validation report, using the `legacy_record_id` bridge added in EB-04.
+- **Spreadsheet imports** — ACE-supplied driver / owner / vehicle / equipment / compliance spreadsheets → canonical registers with dry-run and validation report, using the `legacy_record_id` bridge added in EB-04 and the EB-05 evidence links.
 - **Notifications / Alerts** — email/SMS alerts for canonical Due Soon and Expired records, using the summary engine as source of truth.
+- **Production object-storage adapter** — swap the local filesystem for a private cloud bucket while preserving the storage-abstraction interface introduced in EB-05.
 
 ### P2
 - Automated numbering (auto Driver Code allocation, auto Dispatch Number allocation with reserved-number guard)
-- Final three-row DCC Driver profile interface mock-up (canonical widgets present but layout still compact)
-- Compliance record edit dialogs already present on CompliancePage — add bulk actions and CSV export
+- Malware / AV scanning integration for uploaded evidence
+- Final three-row DCC Driver profile interface mock-up with the canonical Documents & Compliance panels
+- OCR / expiry extraction from uploaded licences / registrations (deferred by design)
+- Compliance record edit dialogs already present — add bulk actions and CSV export
 - Audit log surface (who created/updated/archived) across canonical collections
 
 ### P3

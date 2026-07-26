@@ -138,6 +138,14 @@ Modules:
 - Backend: **197 / 197 pytest pass** (20 new EB-06 tests, zero regression from prior 177)
 - **No real ACE spreadsheet data imported** — all tests use small generated fixtures. Real ACE migration remains a future task per user instructions.
 
+### Phase 2 · Full Frontend Verification Pass (2026-07-26)
+- Ran `testing_agent_v3_fork` twice across EB-03 · EB-04 · EB-05 · EB-06 UI. First pass (iteration_4) flagged 4 defects; second pass (iteration_5) verified all 4 fixes PASS with zero console errors on 8 routes.
+- Fix 1 — **EB-03 DriverProfile canonical widgets**: `DriverProfile.jsx` was fetching `driver-owner-relationships`, `driver-vehicle-assignments` and `driver-equipment-assignments` into local state but never rendering them. Added a new `driver-canonical-widgets` section with three testable tiles (`driver-widget-current-owner`, `driver-widget-vehicle`, `driver-widget-equipment`), each with count pill, empty state, and `Open` deep-link to the corresponding `/relationships/*` page.
+- Fix 2 — **EB-06 New Import description**: added a `new-import-description` textarea to `ImportCentre.jsx` new-import dialog. Backend `imports_module.py` `POST /imports` now accepts an optional trimmed `description` field on the job doc (backwards compatible — 20/20 EB-06 pytest still pass).
+- Fix 3 — **EB-05 ↔ EB-04 evidence chip**: `CompliancePage.jsx` renders a per-row Paperclip chip that hrefs to `/documents?doc=<evidence_document_id>` when present, or a dimmed placeholder when missing. `DocumentLibrary.jsx` now honours the `?doc=<id>` query param via `useSearchParams` and auto-opens the preview modal.
+- Fix 4 — **Registers → DriverProfile navigation**: on `/registers/drivers` the Full Name cell is now a `Link` (`register-name-link-<id>`) and an extra person-icon action (`register-profile-<id>`) both route to `/drivers/<id>`.
+- Zero console errors on `/imports`, `/imports/{id}`, `/registers/drivers`, `/drivers/{id}`, `/compliance/records/{driver-licences,vehicle-registrations,vehicle-insurance}`, `/documents?doc=<id>`.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

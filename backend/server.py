@@ -276,8 +276,8 @@ async def compliance_expiring(current=Depends(get_current_user), horizon: int = 
     """Return rollup counts + per-record details for licences / truck-rego / insurance."""
     today = datetime.now(timezone.utc)
     # Build a driver_id -> name lookup so records can show the canonical driver name
-    drivers = await db.drivers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
-    driver_name_by_id = {d["id"]: d["name"] for d in drivers}
+    drivers = await db.drivers.find({}, {"_id": 0, "id": 1, "name": 1, "full_name": 1}).to_list(2000)
+    driver_name_by_id = {d["id"]: (d.get("name") or d.get("full_name") or "") for d in drivers}
 
     result = {
         "horizon_days": horizon,
@@ -445,7 +445,7 @@ async def backfill_driver_ids():
             )
 
     drivers = await db.drivers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
-    name_to_id = {d["name"]: d["id"] for d in drivers}
+    name_to_id = {d["name"]: d["id"] for d in drivers if d.get("name")}
     if not name_to_id:
         return
     mappings = [
@@ -507,6 +507,9 @@ async def on_startup():
     )
     await doc_ensure_indexes(db)
     await seed_documents(db)
+    # --- EB-06 Guided Spreadsheet Import ---
+    from imports_module import ensure_indexes as imp_ensure_indexes
+    await imp_ensure_indexes(db)
 
 
 # Include router and CORS
@@ -527,6 +530,10 @@ app.include_router(build_compliance_router(db, get_current_user))
 # --- EB-05 Documents router ---
 from documents_module import build_documents_router  # noqa: E402
 app.include_router(build_documents_router(db, get_current_user))
+
+# --- EB-06 Imports router ---
+from imports_module import build_imports_router  # noqa: E402
+app.include_router(build_imports_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

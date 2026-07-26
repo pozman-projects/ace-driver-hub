@@ -13,6 +13,8 @@ import RegisterPage from "./pages/RegisterPage";
 import RelationshipPage from "./pages/RelationshipPage";
 import CompliancePage from "./pages/CompliancePage";
 import DocumentLibrary from "./pages/DocumentLibrary";
+import ImportCentre from "./pages/ImportCentre";
+import ImportWizard from "./pages/ImportWizard";
 
 function App() {
   return (
@@ -82,6 +84,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <DocumentLibrary />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/imports"
+              element={
+                <ProtectedRoute>
+                  <ImportCentre />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/imports/:jobId"
+              element={
+                <ProtectedRoute>
+                  <ImportWizard />
                 </ProtectedRoute>
               }
             />

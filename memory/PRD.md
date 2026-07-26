@@ -124,18 +124,34 @@ Modules:
 - Idempotent EB-05 seed: 1 licence PDF, 1 registration PDF, 1 insurance PDF, 1 inspection PNG, 1 defect PNG, 1 equipment cert PDF, 1 Driver Contract PDF (Restricted), 1 profile photo PNG
 - Backend: **177 / 177 pytest pass** (28 new EB-05 tests, zero regression from prior 149)
 
+### Phase 2 · EB-06 Guided Spreadsheet Import & Migration Framework (2026-07-26)
+- Seven new canonical collections: `import_jobs`, `import_files`, `import_mappings`, `import_rows`, `import_conflicts`, `import_commits`, `import_rollback_events` — every id UUID
+- File parser **openpyxl 3.1.5** with `data_only=True`, `read_only=True`, `keep_links=False`, `keep_vba=False` — formulas never executed, external workbook links never followed, macros never executed. CSV via stdlib. Limits: 50,000 rows / 250 cols / 20 MB.
+- 7 initial domain configs (drivers, owners, vehicles, equipment, driver-licences, vehicle-registrations, vehicle-insurance) with match priorities, required / unique / high-risk field flags, controlled-value enums
+- Reusable normaliser library: whitespace collapse, title-case names, email lower-case, Australian mobile fix, ABN digit-only, upper-case for rego/VIN/equipment, Excel serial-date, Australian date-format parsing, boolean, percentage — every transform visible in the dry-run row report
+- Dry-run pipeline (`POST /validate`): normalise → match → detect duplicates → validate required + controlled → assign action (Create/Update/Skip/Review/No Change) → block on Multiple Candidate Matches or Unique-Field-Conflict → produce per-row / per-conflict artefacts
+- Explicit commit (`POST /commit`) returns HTTP 409 while any Blocking conflict is Unresolved; blank sources never overwrite non-empty fields; high-risk field changes annotated with HIGH-RISK warnings on the row
+- Commit records `record_actions` including before-state on updates → safe rollback (`POST /rollback`, Admin/Manager only) soft-archives created records and restores prior update values, returns Completed/Partially Completed/Failed with per-record error list
+- Compliance imports (driver-licences, vehicle-registrations, vehicle-insurance) run through EB-04 `_classify_expiry` so status is calculated from source dates, never trusted from spreadsheet colour
+- Frontend: `/imports` Import Centre (jobs list, status tiles, new-import dialog); `/imports/{id}` guided Wizard with stepper (Upload → Sheet → Map → Validate → Conflicts → Commit), auto-guess mapping, row table with validation/match/action badges, conflict resolution buttons, explicit-confirm commit dialog, commit history + role-gated rollback; Hub gains "Data Import & Migration" section
+- Role gating: ReadOnly can only list. Allocator/Compliance/Manager/Admin create + upload + map + validate. Compliance/Manager/Admin resolve conflicts + commit. Manager/Admin rollback + archive job.
+- Backend: **197 / 197 pytest pass** (20 new EB-06 tests, zero regression from prior 177)
+- **No real ACE spreadsheet data imported** — all tests use small generated fixtures. Real ACE migration remains a future task per user instructions.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)
-- **Spreadsheet imports** — ACE-supplied driver / owner / vehicle / equipment / compliance spreadsheets → canonical registers with dry-run and validation report, using the `legacy_record_id` bridge added in EB-04 and the EB-05 evidence links.
-- **Notifications / Alerts** — email/SMS alerts for canonical Due Soon and Expired records, using the summary engine as source of truth.
-- **Production object-storage adapter** — swap the local filesystem for a private cloud bucket while preserving the storage-abstraction interface introduced in EB-05.
+- **Real ACE spreadsheet migration** — use the EB-06 framework to import the actual ACE driver / owner / vehicle / equipment / licence / registration / insurance registers with per-workbook mapping profiles and full audit trail.
+- **Notifications / Alerts** — email/SMS alerts for canonical Due Soon and Expired records, using the EB-04 summary engine as source of truth.
+- **Production object-storage adapter** — swap the local filesystem storage adapter (EB-05) and the inline import-file bytes (EB-06) for a private cloud bucket while preserving the storage abstraction.
 
 ### P2
 - Automated numbering (auto Driver Code allocation, auto Dispatch Number allocation with reserved-number guard)
 - Malware / AV scanning integration for uploaded evidence
+- Fuzzy / probable matching for the import framework (currently exact-only)
+- Relationship-domain import profiles (`driver-owner`, `driver-vehicle`, `driver-equipment`)
 - Final three-row DCC Driver profile interface mock-up with the canonical Documents & Compliance panels
-- OCR / expiry extraction from uploaded licences / registrations (deferred by design)
+- OCR / expiry extraction from uploaded licences / registrations
 - Compliance record edit dialogs already present — add bulk actions and CSV export
 - Audit log surface (who created/updated/archived) across canonical collections
 

@@ -1,8 +1,8 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-05) — staging branch · `dcc-phase2-eb05`
+> **Status:** Phase 2 Foundation Build (EB-06) — staging branch · `dcc-phase2-eb06`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
-> **Previous builds:** EB-01 · `dcc-phase2-eb01` · EB-02 · `dcc-phase2-eb02` · EB-03 · `dcc-phase2-eb03` · EB-04 · `dcc-phase2-eb04`
+> **Previous builds:** EB-01 · `dcc-phase2-eb01` · EB-02 · `dcc-phase2-eb02` · EB-03 · `dcc-phase2-eb03` · EB-04 · `dcc-phase2-eb04` · EB-05 · `dcc-phase2-eb05`
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
 surface. Phase 2 builds the canonical foundation registers underneath the
@@ -19,8 +19,9 @@ prototype modules established in Phase 1.
 | **EB-02** — Foundation Registers | ✅ Complete |
 | **EB-03** — Assignment & Relationship Layer | ✅ Complete |
 | **EB-04** — Canonical Compliance Foundation | ✅ Complete |
-| **EB-05** — Document Storage & Evidence Architecture | ✅ **This build** |
-| ACE spreadsheet import               | ⏳ Not performed |
+| **EB-05** — Document Storage & Evidence Architecture | ✅ Complete |
+| **EB-06** — Guided Spreadsheet Import & Migration Framework | ✅ **This build** |
+| Real ACE spreadsheet import          | ⏳ Not performed |
 | Notifications / alerts               | ⏳ Not performed |
 | Production deployment                | ⏳ Not performed |
 
@@ -480,6 +481,207 @@ primary `document_links` row. Restart-safe — the seed is skipped when
 - No changes to authentication credentials or the 5-role permission model
 - No removal or migration of prototype modules or records
 - No `main` branch changes; no production deployment
+
+---
+
+## EB-06 scope (this build) — Guided Spreadsheet Import & Migration Framework
+
+Canonical import pipeline that safely loads XLSX / XLSM / CSV spreadsheets
+into the DCC canonical registers. Every commit follows a mandatory dry-run;
+blocking conflicts must be resolved before commit is allowed; created records
+are reversible for a period after commit via soft-archive rollback.
+
+### Collections added
+
+| Collection | Notes |
+| ---------- | ----- |
+| `import_jobs` | Header record with target domain, mode, status, row counts, commit / rollback timestamps. |
+| `import_files` | Uploaded workbook / CSV metadata + private inline binary (kept server-only, never returned). |
+| `import_mappings` | Versioned source-header → canonical-field mapping profiles. |
+| `import_rows` | One row per source spreadsheet row: raw values, normalised values, validation status, match status, action, errors, warnings, conflict ids, commit status, created / updated record ids. |
+| `import_conflicts` | Row-level conflicts (Blocking / Warning / Information) with resolution + resolved-by / resolved-at. |
+| `import_commits` | Per-commit batch — created / updated / skipped / failed counts + record_actions (before-state for updates) enabling safe rollback. |
+| `import_rollback_events` | Append-only rollback history: restored count, archived-created count, failed count. |
+
+All identifiers are immutable UUID strings (`import_job_id`, `import_file_id`, `mapping_id`, `import_row_id`, `conflict_id`, `import_commit_id`, `rollback_event_id`).
+
+### File parser & safety
+
+- **openpyxl 3.1.5** with `data_only=True`, `read_only=True`, `keep_links=False`, `keep_vba=False`.
+  - Formulas are **never executed** — the parser returns cached values only.
+  - External workbook links are **never followed**.
+  - Macros are **never executed** — the VBA payload is ignored.
+- CSV via Python's stdlib `csv` reader.
+- Row / column / file-size limits enforced: 50,000 rows, 250 columns, 20 MB per file.
+- Hidden sheets are surfaced with a `hidden=true` flag; the operator must consciously select them.
+- Unsupported or unreadable workbooks are rejected with a safe error.
+- Empty rows are dropped from validation.
+
+### Supported target domains
+
+`drivers`, `owners`, `vehicles`, `equipment`, `driver-licences`,
+`vehicle-registrations`, `vehicle-insurance` — each with typed field specs,
+required flags, unique-field detection, controlled-value enums, high-risk
+update flags and a match priority. The `DOMAIN_CONFIGS` registry can be
+extended in code to add relationship domains (`driver-owner`, `driver-vehicle`,
+`driver-equipment`) and further compliance record types.
+
+### Normalisation
+
+Reusable helpers cover whitespace collapse, title-case names, email
+lower-casing, Australian mobile digit-only + leading-zero fix, ABN
+digit-only, registration / VIN / equipment-number upper-casing, Excel serial
+date conversion, Australian date-format parsing (`DD/MM/YYYY`, `D/M/YYYY`,
+`DD-MM-YYYY`, `YYYY-MM-DD`, `DD/MM/YY`), boolean and percentage parsing,
+blank handling. **All transformations are visible in the dry-run row report**
+— nothing is silently changed.
+
+### Matching priorities
+
+- **Drivers**: driver_code → dispatch_number → email → full_name
+- **Owners**: abn → name → email
+- **Vehicles**: vin → registration_number
+- **Equipment**: equipment_number
+- **Compliance rows**: licence_number / registration_number_snapshot / policy_number, then canonical entity id.
+
+The canonical resolver returns `Exact Match` (1 hit), `Multiple Matches`
+(2+ hits — Blocking conflict), or `No Match`. Probable matches remain a
+future enhancement — nothing is auto-merged.
+
+### Duplicate & conflict detection
+
+- Within-file duplicates by business identifier produce warnings.
+- Cross-record unique-field conflicts (e.g. an incoming `driver_code` already
+  held by a different canonical record) create a **Blocking** conflict with
+  the existing record reference.
+- Multiple candidate matches on the mapped fields produce a **Blocking**
+  `Multiple Candidate Matches` conflict.
+
+### Dry-run validation
+
+Every job runs `POST /api/imports/{id}/validate` before commit. The endpoint
+clears prior rows and conflicts, then produces per-row `validation_status`
+(Valid / Warning / Error / Skipped), `match_status`, `action`
+(Create / Update / Skip / Review / No Change) and lifts summary counts onto
+the job. Commit is only allowed once the job is `Ready to Commit` and no
+Blocking conflict remains `Unresolved`.
+
+### Commit safeguards
+
+- Confirmation dialog on the frontend; explicit endpoint (`POST /commit`) on the backend.
+- 409 Conflict returned if any Blocking conflict is still `Unresolved`.
+- Blank source values **never overwrite** an existing non-empty field.
+- High-risk field updates (Driver Code, Dispatch Number, Registration, VIN)
+  raise HIGH-RISK warnings visible on the row.
+- Each commit records enough before-state on `updated` rows to reverse.
+- Failed rows are marked `Failed` and left with an appended error; the job
+  status becomes `Partially Committed`; `POST /retry-failed` flips them back
+  to `Not Committed` for re-attempt.
+
+### Rollback
+
+`POST /api/imports/{id}/rollback` (Admin/Manager only) soft-archives
+records created by this import (matching by `_import_job_id`) and restores
+the captured `before` field state on updates. Result reported as `Completed`,
+`Partially Completed`, `Failed` or `Not Supported`, plus per-record error
+list.
+
+### Compliance imports
+
+For `driver-licences`, `vehicle-registrations` and `vehicle-insurance`, the
+importer feeds committed records through the EB-04 `_classify_expiry` helper
+so `status` is derived from source dates rather than trusted verbatim from
+the spreadsheet. Spreadsheet colour / visual status is never treated as
+authoritative.
+
+### Evidence-reference handling
+
+The importer never invents a document. Optional evidence-filename source
+columns land as unresolved references in the row payload. Only where an
+EB-05 document's checksum, filename or explicit `document_id` unambiguously
+matches will the wiring be proposed for review. External file paths are never
+converted to public links.
+
+### Routes added
+
+```
+GET    /api/imports                              list + filters
+POST   /api/imports                              create job
+GET    /api/imports/{id}                         job detail
+DELETE /api/imports/{id}                         archive (Admin/Manager)
+
+POST   /api/imports/{id}/file                    upload source spreadsheet
+GET    /api/imports/{id}/sheets                  safe workbook inspection
+POST   /api/imports/{id}/inspect                 pick sheet
+POST   /api/imports/{id}/mapping                 attach mapping profile
+
+POST   /api/imports/{id}/validate                dry-run
+GET    /api/imports/{id}/validation-summary
+GET    /api/imports/{id}/rows                    paginated
+GET    /api/imports/{id}/conflicts
+
+PUT    /api/import-conflicts/{cid}               resolve one
+POST   /api/imports/{id}/commit                  explicit commit (409 on blocking)
+GET    /api/imports/{id}/commit-history
+POST   /api/imports/{id}/retry-failed
+POST   /api/imports/{id}/rollback                Admin/Manager
+
+GET    /api/import-templates                     list domain templates
+GET    /api/import-templates/{domain}            fields + required + unique + high-risk metadata
+```
+
+### Frontend surface
+
+- **Import Centre** at `/imports` — new-job button, status summary tiles
+  (In Progress / Committed / Failed / Rolled Back) and a jobs table with
+  domain, mode, status badge, row totals and open link.
+- **Guided Wizard** at `/imports/{id}` — stepper (Upload → Sheet → Map → Validate → Conflicts → Commit) with drag-and-drop upload, sheet chooser (row/column count + header preview), auto-guess column mapping, dry-run + row-level results table (validation status / match status / action / normalised values / errors + warnings), conflict resolution buttons (Skip / Keep Existing / Map to Existing), explicit-confirm commit dialog, commit history + rollback (role-gated).
+- **Hub** gains a "Data Import & Migration" section between Documents & Evidence and Canonical Compliance.
+
+### Permissions
+
+| Action | Admin | Manager | Compliance | Allocator | ReadOnly |
+| ------ | :---: | :-----: | :--------: | :-------: | :------: |
+| List jobs                     | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Create job / upload / map     | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Resolve conflicts             | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Commit                        | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Rollback                      | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Archive job                   | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+### Tests
+
+- `backend/tests/test_imports_eb06.py` — 20 new EB-06 tests
+- Full backend suite: **197 / 197 pytest pass** (was 177; zero regression)
+
+### Known limitations (EB-06)
+
+1. **No real ACE spreadsheets loaded.** All tests use small generated fictional
+   fixtures. Real ACE data migration is a separate future task.
+2. Import file bytes are stored inline on the `import_files` document to keep
+   private storage strictly internal to this module. When large real-world
+   files land, migration to the EB-05 document-storage adapter is
+   straightforward.
+3. Probable / fuzzy matching is not implemented — matches must be exact on
+   the canonical priority fields. Multiple candidates always block for
+   manual review.
+4. Relationship domains (`driver-owner`, `driver-vehicle`, `driver-equipment`)
+   are architecturally supported by the framework but their domain configs
+   are not wired in this build.
+5. Rollback restores the `before` state captured at commit time; if a
+   downstream user has edited the record after import, those manual edits
+   are lost on rollback of that field.
+6. Historical import mappings are versioned but the framework does not yet
+   surface a mapping browser page — profiles are created inline per job.
+
+### What EB-06 explicitly does **not** change
+
+- No real ACE spreadsheet data was imported.
+- No external integrations (Blink, email, SMS, LLMs, Power BI, cloud object storage).
+- No automated numbering, alerts, notifications, OCR or AI extraction.
+- No changes to authentication credentials or the 5-role permission model.
+- No removal or migration of prototype modules or records.
+- No `main` branch changes; no production deployment.
 
 ---
 

@@ -181,6 +181,9 @@ export default function DriverProfile() {
           ) : null}
         </section>
 
+        {/* Numbering identifiers (EB-08) */}
+        <IdentifierCard driver={driver} />
+
         {/* Canonical Relationships & Assignments (EB-03) */}
         <section className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4" data-testid="driver-canonical-widgets">
           <CanonicalWidget
@@ -409,6 +412,72 @@ function ProfileSection({ slug, rows, loading }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+function IdentifierCard({ driver }) {
+  const [history, setHistory] = React.useState([]);
+  React.useEffect(() => {
+    if (!driver?.id) return;
+    let alive = true;
+    api.get(`/numbering/drivers/${driver.id}/history`)
+      .then(({ data }) => alive && setHistory(data || []))
+      .catch(() => alive && setHistory([]));
+    return () => { alive = false; };
+  }, [driver?.id]);
+  if (!driver) return null;
+  const disp = driver.dispatch_number;
+  const dispNum = disp ? parseInt(String(disp), 10) : NaN;
+  const isInactive = !Number.isNaN(dispNum) && dispNum >= 100 && dispNum <= 999
+    && (driver.driver_status === "Inactive" || driver.driver_status === "Archived");
+  const dcEvent = history.find((h) => h.identifier_type === "Driver Code");
+  const source = dcEvent
+    ? (dcEvent.automatic ? "Automatic" : dcEvent.manual_override ? "Manual" : "Imported")
+    : "Imported";
+  return (
+    <section className="mb-6 bg-white border border-slate-200 rounded-xl p-4 shadow-sm" data-testid="driver-identifier-card">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+          Identifiers
+        </div>
+        <Link
+          to={`/administration/numbering`}
+          data-testid="driver-identifier-open-admin"
+          className="inline-flex items-center gap-1 text-xs text-cyan-700 hover:text-cyan-900"
+        >
+          Numbering admin <ArrowUpRight size={11} weight="bold" />
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500">Driver Code</div>
+          <div className="font-display text-lg font-semibold text-slate-900" data-testid="driver-identifier-code">
+            {driver.driver_code || "—"}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            Source: <span data-testid="driver-identifier-source">{source}</span>
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500">Dispatch Number</div>
+          <div className="font-display text-lg font-semibold text-slate-900" data-testid="driver-identifier-dispatch">
+            {disp || "—"}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {disp ? (isInactive ? "Inactive (operational)" : "Active (operational)") : "None allocated"}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500">Allocation history</div>
+          <div className="text-sm text-slate-800" data-testid="driver-identifier-history-count">
+            {history.length} {history.length === 1 ? "event" : "events"}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Full audit in Numbering admin</div>
+        </div>
+      </div>
+    </section>
   );
 }
 

@@ -433,6 +433,14 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
   const handle = async (e) => {
     e.preventDefault();
     if (isView) return;
+    // EB-08 client-side guard: block permanently reserved dispatch numbers
+    if (cfg.slug === "drivers" && form.dispatch_number) {
+      const n = parseInt(String(form.dispatch_number).trim(), 10);
+      if (n === 0 || n === 13) {
+        toast.error(`Dispatch Number ${n} is permanently reserved and cannot be allocated.`);
+        return;
+      }
+    }
     const clean = {};
     for (const f of cfg.fields) {
       const v = form[f.key];
@@ -507,16 +515,32 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
                   ))}
                 </select>
               ) : (
-                <input
-                  type={f.type || "text"}
-                  disabled={isView}
-                  required={!!f.required}
-                  placeholder={f.placeholder || ""}
-                  value={form[f.key] ?? ""}
-                  onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))}
-                  data-testid={`record-field-${f.key}`}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 disabled:bg-slate-50 transition-colors"
-                />
+                <>
+                  <input
+                    type={f.type || "text"}
+                    disabled={isView}
+                    required={!!f.required}
+                    placeholder={f.placeholder || ""}
+                    value={form[f.key] ?? ""}
+                    onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                    data-testid={`record-field-${f.key}`}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 disabled:bg-slate-50 transition-colors"
+                  />
+                  {cfg.slug === "drivers" && f.key === "driver_code" && !isView && (
+                    <DriverCodeAssist
+                      value={form[f.key] || ""}
+                      onFill={(v, meta) => setForm((p) => ({ ...p, [f.key]: v, __driver_code_meta: meta }))}
+                      currentMeta={form.__driver_code_meta}
+                    />
+                  )}
+                  {cfg.slug === "drivers" && f.key === "dispatch_number" && !isView && (
+                    <DispatchAssist
+                      value={form[f.key] || ""}
+                      driverId={record?.id}
+                      onFill={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
+                    />
+                  )}
+                </>
               )}
             </div>
           ))}
@@ -542,6 +566,110 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
             )}
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+
+// EB-08 · Driver Code assistant — Suggest button + sequence-impact readout
+function DriverCodeAssist({ value, onFill, currentMeta }) {
+  const [suggestion, setSuggestion] = React.useState(null);
+  const [sequence, setSequence] = React.useState(null);
+  React.useEffect(() => {
+    api.get("/numbering/driver-code/suggestion")
+      .then(({ data }) => setSuggestion(data)).catch(() => {});
+    api.get("/numbering/driver-code/sequence")
+      .then(({ data }) => setSequence(data)).catch(() => {});
+  }, []);
+  const parsedVal = value ? parseInt(String(value).trim(), 10) : NaN;
+  const isIntShaped = !Number.isNaN(parsedVal) && String(parsedVal) === String(value).trim();
+  const seqVal = sequence?.value ?? 0;
+  const willAdvance = isIntShaped && parsedVal > seqVal;
+  const isHistorical = isIntShaped && parsedVal <= seqVal;
+  const isAuto = suggestion && String(value).trim() === String(suggestion.suggested_driver_code);
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]" data-testid="driver-code-assist">
+      <button
+        type="button"
+        onClick={() => onFill(String(suggestion?.suggested_driver_code || ""), { automatic: true })}
+        disabled={!suggestion}
+        data-testid="driver-code-suggest"
+        className="inline-flex items-center gap-1 border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800 disabled:opacity-40"
+      >
+        Suggest {suggestion ? `→ ${suggestion.suggested_driver_code}` : "…"}
+      </button>
+      {isAuto && (
+        <span data-testid="driver-code-automatic-badge"
+          className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
+          Automatic
+        </span>
+      )}
+      {!isAuto && value && (
+        <span className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+          Manual Override
+        </span>
+      )}
+      {willAdvance && (
+        <span data-testid="driver-code-warn-advance" className="text-amber-700">
+          Warning: this value is above the live sequence ({seqVal}) — saving may advance the sequence.
+        </span>
+      )}
+      {isHistorical && !isAuto && (
+        <span data-testid="driver-code-historical-note" className="text-slate-500">
+          Historical value — sequence pointer will not advance.
+        </span>
+      )}
+    </div>
+  );
+}
+
+// EB-08 · Dispatch Number assistant — reusable pool, next-new, 0/13 guard
+function DispatchAssist({ value, driverId, onFill }) {
+  const [avail, setAvail] = React.useState(null);
+  const [reserved, setReserved] = React.useState(false);
+  React.useEffect(() => {
+    api.get("/numbering/dispatch/available")
+      .then(({ data }) => setAvail(data)).catch(() => {});
+  }, []);
+  const parsedVal = value ? parseInt(String(value).trim(), 10) : NaN;
+  const isReserved = parsedVal === 0 || parsedVal === 13;
+  return (
+    <div className="mt-2 space-y-1.5" data-testid="dispatch-assist">
+      {isReserved && (
+        <div data-testid="dispatch-reserved-warning" className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+          Dispatch Numbers 0 and 13 are permanently reserved and cannot be allocated.
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+        <span className="uppercase tracking-[0.15em] text-slate-500 mr-1">Reusable</span>
+        {(avail?.reusable || []).slice(0, 8).map((n) => (
+          <button
+            key={n} type="button"
+            onClick={() => onFill(String(n))}
+            data-testid={`dispatch-reuse-${n}`}
+            className="border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800"
+          >
+            {n}
+          </button>
+        ))}
+        {(!avail || !avail.reusable?.length) && (
+          <span className="text-slate-400">None</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[10px]">
+        <span className="uppercase tracking-[0.15em] text-slate-500">Next new</span>
+        <button type="button"
+          onClick={() => avail?.next_new && onFill(String(avail.next_new))}
+          disabled={!avail?.next_new}
+          data-testid="dispatch-next-new"
+          className="border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800 disabled:opacity-40"
+        >
+          {avail?.next_new || "—"}
+        </button>
+        <span className="text-slate-400">Reserved</span>
+        <span className="border border-red-200 bg-red-50 text-red-700 rounded-full px-2 py-0.5">0</span>
+        <span className="border border-red-200 bg-red-50 text-red-700 rounded-full px-2 py-0.5">13</span>
       </div>
     </div>
   );

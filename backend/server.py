@@ -519,6 +519,10 @@ async def on_startup():
     await notif_ensure_indexes(db)
     await notif_seed_rules(db)
     await notif_seed_examples(db)
+    # --- EB-08 Automated Numbering ---
+    from numbering_module import ensure_indexes as num_ensure_indexes, seed_examples as num_seed
+    await num_ensure_indexes(db)
+    await num_seed(db)
 
 
 # Include router and CORS
@@ -547,6 +551,10 @@ app.include_router(build_imports_router(db, get_current_user))
 # --- EB-07a Notifications router ---
 from notifications_module import build_notifications_router  # noqa: E402
 app.include_router(build_notifications_router(db, get_current_user))
+
+# --- EB-08 Numbering router ---
+from numbering_module import build_numbering_router  # noqa: E402
+app.include_router(build_numbering_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

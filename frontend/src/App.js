@@ -16,6 +16,7 @@ import DocumentLibrary from "./pages/DocumentLibrary";
 import ImportCentre from "./pages/ImportCentre";
 import ImportWizard from "./pages/ImportWizard";
 import NotificationsCentre from "./pages/NotificationsCentre";
+import NumberingAdmin from "./pages/NumberingAdmin";
 
 function App() {
   return (
@@ -113,6 +114,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <NotificationsCentre />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/numbering"
+              element={
+                <ProtectedRoute>
+                  <NumberingAdmin />
                 </ProtectedRoute>
               }
             />

@@ -41,9 +41,11 @@ export default function NotificationsCentre() {
   const current = TABS.find((t) => t.slug === view) || TABS[0];
   const [overview, setOverview] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     api.get("/notifications/overview").then(({ data }) => setOverview(data)).catch(() => {});
+    api.get("/notifications/counts").then(({ data }) => setUnread(data?.unread || 0)).catch(() => {});
   }, [location.pathname]);
 
   const openDetail = (notification_id) => setDetail(notification_id);
@@ -71,7 +73,7 @@ export default function NotificationsCentre() {
 
         <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5" data-testid="notification-summary">
           <SummaryTile label="Active" count={overview?.by_status?.Active ?? 0} tone="green" />
-          <SummaryTile label="Unread" count={_unreadTotal(overview)} tone="cyan" />
+          <SummaryTile label="Unread" count={unread} tone="cyan" />
           <SummaryTile label="Critical" count={overview?.by_severity?.Critical ?? 0} tone="red" />
           <SummaryTile label="High" count={overview?.by_severity?.High ?? 0} tone="orange" />
           <SummaryTile label="Snoozed" count={overview?.by_status?.Snoozed ?? 0} tone="slate" />
@@ -127,11 +129,7 @@ export default function NotificationsCentre() {
   );
 }
 
-function _unreadTotal(overview) {
-  if (!overview?.by_status) return 0;
-  // Same shape used on the header bell for consistency
-  return 0; // Overview does not carry unread; keep independent
-}
+function _unreadTotal() { return 0; /* deprecated stub retained for compatibility */ }
 
 function SummaryTile({ label, count, tone }) {
   const bg = tone === "green" ? "bg-emerald-50 text-emerald-700"
@@ -509,7 +507,7 @@ function NotificationDetailDrawer({ notificationId, onClose, onChanged }) {
                 <div>
                   <div className="text-xs text-slate-800">{a.acknowledged_by}</div>
                   <div className="text-[10px] text-slate-500">{formatDateTime(a.acknowledged_at)}</div>
-                  {a.note && <div className="text-[11px] text-slate-600 italic mt-1">"{a.note}"</div>}
+                  {a.note && <div className="text-[11px] text-slate-600 italic mt-1">&ldquo;{a.note}&rdquo;</div>}
                 </div>
               )} />
 

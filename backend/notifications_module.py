@@ -1547,12 +1547,26 @@ async def seed_examples(db) -> None:
         return await engine.emit_event(evt_type, entity_type, entity_id, source_record_id,
                                         payload, severity=severity, source="seed-eb07")
 
-    # Skip if any seed-eb07 example already exists — idempotent
-    if await db[NOTIFS_COLL].count_documents({"_source": SEED_TAG}) > 0:
-        return
-
     admin = await db.users.find_one({"role": "Admin"}, {"_id": 0})
     admin_email = (admin or {}).get("email") or "system"
+
+    # Always link the ImportJob seed to a real job if one exists — this is
+    # dedup-safe via event_key and gives the /imports badge something to
+    # render on every restart.
+    try:
+        existing_job = await db["import_jobs"].find_one({}, {"_id": 0, "id": 1})
+        if existing_job and existing_job.get("id"):
+            rid = existing_job["id"]
+            await _emit(EventType.ImportValidationFailed.value, EntityType.ImportJob.value,
+                        rid, rid,
+                        {"job_ref": rid, "target_domain": "drivers", "error_rows": 3,
+                         "created_by": admin_email})
+    except Exception:
+        pass
+
+    # Skip the rest if any seed-eb07 example already exists — idempotent
+    if await db[NOTIFS_COLL].count_documents({"_source": SEED_TAG, "entity_type": {"$ne": "ImportJob"}}) > 0:
+        return
 
     await _emit(EventType.ComplianceDueSoon.value, EntityType.Driver.value,
                 "seed-drv-01", "seed-lic-01",
@@ -1581,10 +1595,8 @@ async def seed_examples(db) -> None:
                 "seed-doc-01", "seed-doc-01",
                 {"entity_label": "SEED-V05", "document_title": "Insurance Cert 2027"})
 
-    await _emit(EventType.ImportValidationFailed.value, EntityType.ImportJob.value,
-                "seed-imp-01", "seed-imp-01",
-                {"job_ref": "IMP-SEED-01", "target_domain": "drivers", "error_rows": 3,
-                 "created_by": admin_email})
+    # (ImportJob validation-failed emission moved above — runs on every startup
+    #  and safely dedups via event_key.)
 
     # Acknowledged example
     ack_res = await _emit(EventType.ComplianceDueSoon.value, EntityType.Driver.value,

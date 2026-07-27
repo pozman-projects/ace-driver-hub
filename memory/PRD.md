@@ -162,6 +162,17 @@ Modules:
 - **Frontend intentionally NOT built** in EB-07a. Bell, Notifications Centre, cross-module indicators are deferred to EB-07b.
 - **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` bumped to `dcc-phase2-eb07a`.
 
+### Phase 2 · EB-07b Notifications Centre & Frontend Integration (2026-07-27)
+- **Header notification bell** (`NotificationBell.jsx`) mounted in `AppHeader`. Unread badge + Critical/High severity dot + recent-notification dropdown with severity dot, title, time and source deep-link. Polls `/notifications/counts` every 60s.
+- **Notifications Centre** at `/notifications/:view` with 10 route slugs (my/all/critical/snoozed/resolved/rules/preferences/outbox/failed/jobs). Summary tiles (Active/Unread/Critical/High/Snoozed/Delivery Failures), search + status/severity/event/entity/unread/archived filters, list rows with severity/status/times/entity, detail drawer with recipients/deliveries/acks/snoozes/escalations + Mark-read/Acknowledge/Snooze/Resolve/Reopen actions all role-gated.
+- **Severity-aware snooze ceiling** enforced in the UI (Critical 24h → Info/Low 30d), backed by backend HTTP 400 on excess. Explicit disclaimer: ack/snooze do not change source compliance.
+- **Rules editor** with full CRUD dialog + toggle + archive + client-side "Test Rule" (simulated toast, no external delivery). **Preferences** page with per-user event × channel × min-severity × digest configuration and dev-mode banner.
+- **Delivery Outbox** with "Development Simulation Only" banner, filters, simulate-success/simulate-failure per row, and inline detail modal showing rendered subject/body. **Failed Deliveries** view + one-click retry. **Job History** with six manual job-run buttons (compliance-scan/critical-scan/process-snoozes/process-escalations/retry-deliveries/reconcile), confirmation dialog, run history table.
+- **Cross-module alert indicators**: Hub notification strip, per-row `register-alert-<id>` on `/registers/{drivers,vehicles,equipment}`, `driver-alerts-card` on DriverProfile, `canonical-tile-*-alerts` on Compliance canonical overview, `import-alert-<id>` on Import Centre. All derived from notifications — canonical status is never replaced.
+- Backend `seed_examples` updated to emit the ImportJob validation-failed seed against a **real** `import_jobs.id` on every startup (dedup-safe via `event_key`).
+- **Tests**: `testing_agent_v3_fork` — iteration_6 (full flow: 77 PASS, 0 console errors) → iteration_7 (targeted re-verification of two low-priority fixes: PASS). Backend pytest remains at **237/237**.
+- **No external providers activated**, **no live cron loop**, **no real ACE data imported**, **no production deploy**, `main` untouched. `/app/VERSION` → `dcc-phase2-eb07b`.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

@@ -1093,3 +1093,142 @@ data was imported**.
 - Frontend integration (bell, Notifications Centre, cross-module
   indicators) is intentionally **not** built in EB-07a — that is EB-07b.
 
+## Phase 2 · EB-07b — Notifications Centre & Frontend Integration — 2026-07-27
+
+Full DCC notification user experience built against the EB-07a backend.
+The approved DCC shell, branding, header, canonical registers,
+relationships, compliance, documents and import wizard are all
+preserved — the notification frontend adds a header bell, a full
+Notifications Centre, and compact cross-module alert indicators.
+
+### Header notification bell
+- `NotificationBell` mounted in `AppHeader`. Shows unread count badge,
+  Critical/High severity indicator dot, and a recent-notification
+  dropdown with severity dots, titles, human-friendly times, and
+  source-record deep-links.
+- Polls `/api/notifications/counts` every 60 seconds.
+- Mark-all-read acts on the visible dropdown rows.
+
+### Notifications Centre (`/notifications/:view`)
+Route slugs: `my`, `all`, `critical`, `snoozed`, `resolved`, `rules`,
+`preferences`, `outbox`, `failed`, `jobs`. Tabbed single page — each
+slug is a real URL and preserves browser navigation.
+
+- Summary tiles: Active, Unread, Critical, High, Snoozed, Delivery
+  Failures.
+- List filters: search, status, severity, event type, entity type,
+  unread-only, include-archived, refresh.
+- Detail drawer: title, message, severity, status, entity meta,
+  first/last triggered, next repeat, recipients, deliveries (rendered
+  subject + body), acknowledgements, snoozes, escalations. Actions
+  gated by role: Mark read, Acknowledge (with note), Snooze
+  (preset + custom hours, severity ceiling enforced), Resolve (reason
+  required), Reopen (Admin / Manager only).
+- Explicit disclaimers: acknowledgement and snooze track operator
+  awareness only — they do not modify canonical compliance status.
+
+### Rules
+- Full CRUD dialog with all engine fields (event type, entity type,
+  severity, channels, recipient strategy, warning days, repeat
+  interval, template key, priority, active).
+- Toggle active/inactive without archive.
+- Archive with confirmation.
+- Test rule — client-side simulated toast; no external delivery.
+
+### Preferences
+- Per-user event × channel preferences with minimum severity, digest
+  mode, enabled toggle. Development banner explains that Email/SMS
+  are simulated and Critical cannot be fully disabled.
+
+### Delivery Outbox
+- "Development Simulation Only" banner.
+- Filters by status and channel.
+- Row-level Simulate Success / Simulate Failure actions.
+- Detail modal renders subject and body inline; provider credentials
+  are never displayed.
+
+### Failed Deliveries
+- Filtered outbox view (Failed + Retry Scheduled).
+- One-click retry.
+
+### Job History
+- Six manual job-run buttons with confirmation dialog:
+  compliance-scan, critical-scan, process-snoozes,
+  process-escalations, retry-deliveries, reconcile.
+- Runs appear in the history table with status, timing, counts and
+  triggered-by. **No live in-process cron** — messaging that
+  Production requires a durable scheduler stays visible on the page.
+
+### Cross-module indicators (source of truth = notifications, not
+copied master fields)
+- Hub: `hub-notification-strip` with Active / Critical / High /
+  Delivery-failures counters and deep-links.
+- Register (`/registers/drivers|vehicles|equipment|owners`): per-row
+  `register-alert-<id>` badge fed by a single bulk fetch grouped by
+  `entity_id` (no N+1).
+- Driver Profile: `driver-alerts-card` with `driver-alert-badge` and
+  `driver-alerts-open` deep-link.
+- Compliance Overview canonical tiles: `canonical-tile-*-alerts`
+  badges (do not replace canonical compliance status).
+- Import Centre: per-job `import-alert-<id>` badge.
+- Document Library: deep-linked from notification detail via
+  `/documents?doc=<id>` (existing EB-05b fix).
+
+### Backend touch
+- `notifications_module.seed_examples` now emits the ImportJob
+  validation-failed seed against a **real** `import_jobs.id` on
+  every startup (dedup-safe via `event_key`). Fixes the previously
+  orphaned `IMP-SEED-01` reference.
+- No other backend changes. All 237 EB-07a tests remain green
+  (40 EB-07a + 197 baseline).
+
+### Files added
+- `frontend/src/lib/notifications.js`
+- `frontend/src/components/app/NotificationBell.jsx`
+- `frontend/src/components/app/NotificationBadge.jsx`
+- `frontend/src/pages/NotificationsCentre.jsx`
+- `frontend/src/pages/NotificationRules.jsx`
+- `frontend/src/pages/NotificationPreferences.jsx`
+- `frontend/src/pages/NotificationOutbox.jsx`
+- `frontend/src/pages/NotificationFailedDeliveries.jsx`
+- `frontend/src/pages/NotificationJobs.jsx`
+
+### Files modified
+- `frontend/src/App.js` — new `/notifications/:view` route.
+- `frontend/src/components/app/AppHeader.jsx` — mounts the bell.
+- `frontend/src/pages/Hub.jsx` — adds the notification alert strip.
+- `frontend/src/pages/RegisterPage.jsx` — per-row alert badge with
+  bulk entity fetch.
+- `frontend/src/pages/DriverProfile.jsx` — Active alerts card.
+- `frontend/src/pages/Compliance.jsx` — per-tile alert badge on
+  canonical Overview.
+- `frontend/src/pages/ImportCentre.jsx` — per-job alert badge.
+- `backend/notifications_module.py` — real-job link for the
+  ImportJob seed emission.
+
+### Testing
+- Two frontend QA passes via `testing_agent_v3_fork`:
+  - Iteration 6 — full end-to-end frontend flow verification:
+    77 flows PASS, zero console errors, dedup verified via repeated
+    compliance scans, snooze/ack/resolve/reopen full lifecycle
+    verified against seed notifications, cross-module badges
+    verified on drivers (70), vehicles (50), compliance tiles (38 +
+    32), driver profile, and imports.
+  - Iteration 7 — targeted re-verification of the two low-priority
+    fixes: Unread summary tile now wired to
+    `/notifications/counts.unread`; ImportJob alert badge renders
+    on a real `/imports` row. PASS.
+- **Backend: 237/237 pytest still green** — no regression.
+
+### Known limitations / Production requirements
+- Email/SMS providers are not activated. All non-in-app deliveries
+  remain `Simulated`. The outbox surfaces the rendered content only.
+- No live cron loop. Production must invoke the six notification
+  job endpoints from a durable scheduler (Kubernetes CronJob /
+  Cloud Scheduler / equivalent).
+- Rules "Test Rule" produces a client-side simulated toast — a full
+  server-side dry-run endpoint remains a future enhancement.
+- Digest modes are stored but the digest sender is not yet built.
+- No real ACE data was imported. No Production deployment
+  occurred. `main` remains untouched.
+

@@ -2,6 +2,7 @@ import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { ArrowLeft, SignOut } from "@phosphor-icons/react";
+import NotificationBell from "./NotificationBell";
 
 export default function AppHeader({ showBack = false }) {
   const { user, logout } = useAuth();
@@ -40,6 +41,7 @@ export default function AppHeader({ showBack = false }) {
       </div>
 
       <div className="flex items-center gap-4">
+        {user && <NotificationBell />}
         {user && (
           <div className="hidden md:flex flex-col items-end leading-tight" data-testid="header-user-info">
             <span className="text-sm font-medium text-white">{user.full_name}</span>

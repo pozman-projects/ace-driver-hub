@@ -14,6 +14,7 @@ import {
   Toolbox,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import NotificationBadge from "../components/app/NotificationBadge";
 
 const LEGACY_LABELS = {
   licences: "Driver Licences",
@@ -241,6 +242,14 @@ function EntityTile({ label, icon: Icon, totals, items, loading, testid, openBas
       {items.length > 0 && (
         <div className="text-[11px] text-slate-400 mt-2">{items.length} in current view</div>
       )}
+      <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Active alerts</span>
+        <NotificationBadge
+          entityType={label === "Drivers" ? "Driver" : label === "Vehicles" ? "Vehicle" : "Equipment"}
+          testid={`${testid}-alerts`}
+          linkTo={`/notifications/all?entity_type=${label === "Drivers" ? "Driver" : label === "Vehicles" ? "Vehicle" : "Equipment"}`}
+        />
+      </div>
     </div>
   );
 }

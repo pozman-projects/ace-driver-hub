@@ -4,6 +4,7 @@ import AppHeader from "../components/app/AppHeader";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { findModule, humanLabel } from "../lib/modules";
 import { toast } from "sonner";
+import NotificationBadge from "../components/app/NotificationBadge";
 import {
   User,
   ArrowUpRight,
@@ -268,6 +269,29 @@ export default function DriverProfile() {
               </ul>
             )}
           </CanonicalWidget>
+        </section>
+
+        {/* Active Notifications (EB-07b) */}
+        <section className="mb-6 bg-white border border-slate-200 rounded-xl p-4 shadow-sm" data-testid="driver-alerts-card">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+              Active alerts
+            </div>
+            <Link
+              to={`/notifications/all?entity_type=Driver&entity_id=${driverId}`}
+              data-testid="driver-alerts-open"
+              className="inline-flex items-center gap-1 text-xs text-cyan-700 hover:text-cyan-900"
+            >
+              Open Centre <ArrowUpRight size={11} weight="bold" />
+            </Link>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <NotificationBadge entityType="Driver" entityId={driverId}
+              testid="driver-alert-badge"
+              linkTo={`/notifications/all?entity_type=Driver&entity_id=${driverId}`} />
+            <span className="text-xs text-slate-500">Acknowledgement and snooze do not change source compliance status.</span>
+          </div>
         </section>
 
         {/* Canonical Compliance Summary (EB-04) */}

@@ -15,6 +15,7 @@ import CompliancePage from "./pages/CompliancePage";
 import DocumentLibrary from "./pages/DocumentLibrary";
 import ImportCentre from "./pages/ImportCentre";
 import ImportWizard from "./pages/ImportWizard";
+import NotificationsCentre from "./pages/NotificationsCentre";
 
 function App() {
   return (
@@ -100,6 +101,18 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ImportWizard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={<Navigate to="/notifications/my" replace />}
+            />
+            <Route
+              path="/notifications/:view"
+              element={
+                <ProtectedRoute>
+                  <NotificationsCentre />
                 </ProtectedRoute>
               }
             />

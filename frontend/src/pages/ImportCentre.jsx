@@ -4,6 +4,7 @@ import AppHeader from "../components/app/AppHeader";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
+import NotificationBadge from "../components/app/NotificationBadge";
 import {
   Plus, ArrowUpRight, UploadSimple, X, ArrowClockwise, ArrowCounterClockwise,
   CheckCircle, Warning, ClockCounterClockwise,
@@ -137,10 +138,16 @@ export default function ImportCentre() {
                     <td className="px-6 py-3.5 text-emerald-700 text-sm font-medium">{j.created_rows}</td>
                     <td className="px-6 py-3.5 text-cyan-700 text-sm font-medium">{j.updated_rows}</td>
                     <td className="px-6 py-3.5 text-right">
-                      <button onClick={() => nav(`/imports/${j.id}`)} data-testid={`import-open-${j.id}`}
-                        className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900">
-                        Open <ArrowUpRight size={12} weight="bold" />
-                      </button>
+                      <div className="inline-flex items-center gap-2">
+                        <NotificationBadge entityType="ImportJob" entityId={j.id}
+                          testid={`import-alert-${j.id}`}
+                          linkTo={`/notifications/all?entity_type=ImportJob&entity_id=${j.id}`}
+                          compact />
+                        <button onClick={() => nav(`/imports/${j.id}`)} data-testid={`import-open-${j.id}`}
+                          className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900">
+                          Open <ArrowUpRight size={12} weight="bold" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

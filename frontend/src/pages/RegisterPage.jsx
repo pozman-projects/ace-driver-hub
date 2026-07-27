@@ -16,6 +16,7 @@ import {
   User,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import NotificationBadge from "../components/app/NotificationBadge";
 
 export default function RegisterPage() {
   const { slug } = useParams();
@@ -30,6 +31,7 @@ export default function RegisterPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [showArchived, setShowArchived] = useState(false);
   const [dialog, setDialog] = useState(null); // { mode: "create"|"edit"|"view", record }
+  const [notifsByEntity, setNotifsByEntity] = useState({});
 
   // Preserve hooks order — declare after cfg but before any early return
   const needsOwners = useMemo(
@@ -59,6 +61,28 @@ export default function RegisterPage() {
       active = false;
     };
   }, [cfg, showArchived, needsOwners]);
+
+  // Fetch active notifications for this register's entity_type so we can
+  // render compact per-row alert chips without N+1 requests.
+  useEffect(() => {
+    if (!cfg) return;
+    const entityMap = { drivers: "Driver", vehicles: "Vehicle", equipment: "Equipment", owners: "Owner" };
+    const entityType = entityMap[slug];
+    if (!entityType) return;
+    let alive = true;
+    api.get("/notifications", { params: { entity_type: entityType } })
+      .then(({ data }) => {
+        if (!alive) return;
+        const grouped = {};
+        for (const n of data || []) {
+          if (n.is_archived || n.status === "Resolved") continue;
+          (grouped[n.entity_id] = grouped[n.entity_id] || []).push(n);
+        }
+        setNotifsByEntity(grouped);
+      })
+      .catch(() => alive && setNotifsByEntity({}));
+    return () => { alive = false; };
+  }, [cfg, slug]);
 
   const ownersById = useMemo(() => {
     const m = {};
@@ -268,6 +292,14 @@ export default function RegisterPage() {
                       ))}
                       <td className="px-6 py-3.5 text-right">
                         <div className="inline-flex items-center gap-1">
+                          {notifsByEntity[row.id]?.length > 0 && (
+                            <NotificationBadge
+                              testid={`register-alert-${row.id}`}
+                              notifications={notifsByEntity[row.id]}
+                              linkTo={`/notifications/all?entity_id=${row.id}`}
+                              compact
+                            />
+                          )}
                           {slug === "drivers" && (
                             <Link
                               to={`/drivers/${row.id}`}

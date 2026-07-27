@@ -20,6 +20,7 @@ import AppHeader from "../components/app/AppHeader";
 import { MODULES } from "../lib/modules";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { SEVERITY_DOT } from "../lib/notifications";
 
 const ICONS = {
   Users,
@@ -106,6 +107,9 @@ export default function Hub() {
             Modules · <span className="text-gray-900 font-medium">{MODULES.length}</span>
           </div>
         </section>
+
+        {/* Notification strip (EB-07b) */}
+        <NotificationStrip />
 
         {/* Compliance widget */}
         <ComplianceWidget data={compliance} loaded={loaded} />
@@ -413,6 +417,59 @@ export default function Hub() {
         </footer>
       </main>
     </div>
+  );
+}
+
+function NotificationStrip() {
+  const [overview, setOverview] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    let alive = true;
+    api.get("/notifications/overview")
+      .then(({ data }) => alive && setOverview(data))
+      .catch(() => alive && setOverview(null))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, []);
+  if (loading || !overview) return null;
+  const active = overview.by_status?.Active ?? 0;
+  const critical = overview.by_severity?.Critical ?? 0;
+  const high = overview.by_severity?.High ?? 0;
+  const failed = overview.delivery_failures ?? 0;
+  const anything = active + critical + high + failed;
+  if (anything === 0) return null;
+  const items = [
+    { label: "Active alerts", value: active, dot: SEVERITY_DOT.Medium, to: "/notifications/all?status=Active" },
+    { label: "Critical", value: critical, dot: SEVERITY_DOT.Critical, to: "/notifications/critical?severity=Critical" },
+    { label: "High", value: high, dot: SEVERITY_DOT.High, to: "/notifications/critical?severity=High" },
+    { label: "Delivery failures", value: failed, dot: "bg-red-500", to: "/notifications/failed" },
+  ];
+  return (
+    <section
+      data-testid="hub-notification-strip"
+      className="mb-4 bg-white border border-slate-200 rounded-xl px-5 py-3 shadow-sm"
+    >
+      <div className="flex flex-wrap items-center gap-3 justify-between">
+        <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500 inline-flex items-center gap-2">
+          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+          Active alert summary
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {items.map((i) => (
+            <Link key={i.label} to={i.to}
+              data-testid={`hub-alert-${i.label.toLowerCase().replace(/\s+/g, "-")}`}
+              className="inline-flex items-center gap-1.5 text-xs text-slate-700 hover:text-slate-900">
+              <span className={`inline-flex h-1.5 w-1.5 rounded-full ${i.dot}`} />
+              <span>{i.label}</span>
+              <span className="font-semibold text-slate-900">{i.value}</span>
+            </Link>
+          ))}
+          <Link to="/notifications/all" data-testid="hub-alert-open" className="text-[10px] uppercase tracking-[0.15em] text-cyan-700 hover:text-cyan-900 font-semibold">
+            Open Centre →
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 

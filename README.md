@@ -966,3 +966,130 @@ Captured in `memory/PRD.md`. Not part of this baseline:
 **Phase 1 Baseline complete.** All listed features implemented and tested. No
 new functionality added beyond this baseline in this commit — this version is
 the secure checkpoint for future iterations.
+
+---
+
+## Phase 2 · EB-07a — Notifications, Alerts & Escalation Engine (backend) — 2026-07-27
+
+Canonical DCC notification engine. In-app notifications are real; email and
+SMS deliveries are **Simulated** — no external provider is contacted in
+development. Rendered content is visible via the authenticated development
+outbox.
+
+### Collections added
+`notification_rules`, `notification_events`, `notifications`,
+`notification_recipients`, `notification_deliveries`,
+`notification_acknowledgements`, `notification_snoozes`,
+`notification_escalations`, `notification_job_runs`,
+`notification_dead_letters`, `notification_preferences`. Immutable UUID ids,
+audit fields, `_source` tagging, soft-archive semantics preserved.
+
+### Engine
+- 19 controlled `event_type` values, 15 `entity_type` values, 5 severities,
+  3 channels, 8 notification statuses, 9 delivery statuses, 5 digest modes,
+  9 recipient types, 12 recipient strategies.
+- Deterministic `event_key` (SHA-256 truncated) — repeated processing of the
+  same logical event is idempotent.
+- Deduplication key on the notification collapses repeated events into a
+  single Active notification with `last_triggered_at` updates.
+- Recipient resolver walks canonical `users`, `drivers`, `owners` only —
+  **no personal contact information is duplicated** into notification data.
+  Recipient snapshots are stored on `notification_recipients` for delivery
+  history only.
+- 15 versioned templates (`compliance_due_soon`, `compliance_expired`,
+  `compliance_missing`, `critical_defect`, `high_defect`,
+  `maintenance_due_soon`, `maintenance_overdue`,
+  `driver_activation_incomplete`, `document_under_review`,
+  `document_rejected`, `import_validation_failed`, `import_ready_to_commit`,
+  `import_partial_commit`, `import_commit_failed`, `manual_notification`).
+  Placeholders are safe — no arbitrary code execution.
+- Scheduler abstraction with **manual + startup-one-shot** entrypoints. No
+  live in-process cron loop is enabled in EB-07a. Production requires a
+  durable worker (e.g. Kubernetes CronJob or Cloud Scheduler) — documented
+  as a known limitation.
+
+### Compliance & critical scans
+- Idempotent compliance scan reads EB-04 canonical records
+  (`driver_licences`, `vehicle_registrations`, `vehicle_insurance_policies`)
+  and emits Due Soon / Expired / Missing events.
+- Idempotent critical scan reads EB-04 defects and maintenance tasks and
+  emits Critical / High / Due Soon / Overdue events.
+- Reconciliation job auto-resolves notifications whose source is no longer
+  triggering the condition.
+
+### Escalation
+- Configurable per-rule `escalation_policy`. Defaults:
+  Due Soon → escalate to **High** after 23 days.
+  Expired → escalate to **Critical** after 3 days.
+  Critical Defect → repeat every 4h; expand recipients to Admin after 24h.
+  Maintenance Overdue → escalate to Critical after 3 days.
+- Every escalation writes an immutable `notification_escalations` row and
+  updates the notification severity + status.
+
+### Snooze
+- Ceiling per severity (configurable): Information/Low 30d, Medium 14d,
+  High 7d, Critical 24h. Excess is rejected with HTTP 400.
+- Snooze does not touch the source record. When the snooze expires the
+  `process-snoozes` job returns the notification to Active if the source
+  condition still holds.
+
+### Delivery
+- In-app deliveries are recorded as `Sent` immediately.
+- Email/SMS deliveries are recorded as `Simulated` — provider stored as
+  `simulated`, rendered subject/body captured, no network call made.
+- Retry schedule (configurable): 0m, 5m, 30m, 2h, 12h. After 5 attempts a
+  delivery is failed and a `notification_dead_letters` row is created. If
+  **all** deliveries for a notification are Failed, the notification moves
+  to `Delivery Failed`.
+- Development outbox exposes `simulate-failure` / `simulate-success` per
+  delivery, gated to Admin/Manager.
+
+### Routes (all under `/api/…`)
+- Notifications: `GET /notifications`, `GET /notifications/{id}`, `PUT /notifications/{id}/read`, `POST /notifications/{id}/acknowledge`, `POST /notifications/{id}/snooze`, `POST /notifications/{id}/resolve`, `POST /notifications/{id}/reopen`, `DELETE /notifications/{id}`, `GET /notifications/overview`, `GET /notifications/counts`, `GET /notifications/my-notifications`.
+- Rules: `GET/POST/PUT/DELETE /notification-rules[/{id}]`.
+- Preferences: `GET/PUT /notification-preferences/me`, `GET /notification-preferences`, `PUT /notification-preferences/{id}`.
+- Jobs: `POST /notification-jobs/{compliance-scan|critical-scan|process-snoozes|process-escalations|retry-deliveries|reconcile}`, `GET /notification-jobs`, `GET /notification-jobs/{id}`.
+- Outbox: `GET /notification-outbox`, `GET /notification-outbox/{id}`, `POST /notification-outbox/{id}/simulate-failure`, `POST /notification-outbox/{id}/simulate-success`.
+
+### Permissions
+| Role | Rules | Jobs | Outbox | Ack/Snooze | Resolve | Reopen | Archive |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| ReadOnly | list-only | ✕ | ✕ | ✕ | ✕ | ✕ | ✕ |
+| Allocator | list-only | ✕ | ✕ | ✓ | ✕ | ✕ | ✕ |
+| Compliance | list-only | compliance-scan / critical-scan | ✓ (view) | ✓ | ✓ | ✕ | ✕ |
+| Manager | full | all | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Admin | full | all | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Critical notifications cannot be fully disabled by ordinary users via
+`/notification-preferences/me` (HTTP 400).
+
+### Seed data (`_source: "seed-eb07"`, idempotent)
+1 Due Soon licence · 1 Expired registration · 1 Missing insurance ·
+1 Critical defect · 1 Overdue maintenance · 1 Document Under Review ·
+1 Import Validation Failed · 1 Acknowledged · 1 Snoozed · 1 Escalated ·
+1 Failed simulated delivery · 1 Resolved. All fictional; **no real ACE
+data was imported**.
+
+### Testing
+- `backend/tests/test_notifications_eb07a.py` — **40 new pytest cases**
+  covering rules/events/dedup/lifecycle/deliveries/retry/dead-letter/
+  escalation/snooze/preferences/permissions/jobs.
+- **237 / 237 backend pytest pass** — zero regression from the previous
+  197 baseline. Two legacy tests in `test_driver_relationships.py` were
+  hardened to tolerate drivers created via EB-06 import (which use only
+  `full_name`) — no behavioural change.
+
+### Known limitations / Production requirements
+- No external email/SMS provider is activated. All non-in-app deliveries
+  are `Simulated`.
+- No live in-process cron. Production must run the six job endpoints via
+  a durable scheduler (Kubernetes CronJob / Cloud Scheduler / equivalent).
+- Fuzzy or probable matching is not implemented — event keys are exact.
+- Digest modes are stored on preferences but not yet acted on (no digest
+  sender in EB-07a).
+- Driver Activation event surfaces are prepared but source records for
+  activation still live in the existing legacy onboarding module. Full
+  activation-readiness scanning is deferred to a later milestone.
+- Frontend integration (bell, Notifications Centre, cross-module
+  indicators) is intentionally **not** built in EB-07a — that is EB-07b.
+

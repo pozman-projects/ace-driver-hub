@@ -146,6 +146,22 @@ Modules:
 - Fix 4 — **Registers → DriverProfile navigation**: on `/registers/drivers` the Full Name cell is now a `Link` (`register-name-link-<id>`) and an extra person-icon action (`register-profile-<id>`) both route to `/drivers/<id>`.
 - Zero console errors on `/imports`, `/imports/{id}`, `/registers/drivers`, `/drivers/{id}`, `/compliance/records/{driver-licences,vehicle-registrations,vehicle-insurance}`, `/documents?doc=<id>`.
 
+### Phase 2 · EB-07a Notifications, Alerts & Escalation Engine (backend only) (2026-07-27)
+- **11 canonical collections**: `notification_rules`, `notification_events`, `notifications`, `notification_recipients`, `notification_deliveries`, `notification_acknowledgements`, `notification_snoozes`, `notification_escalations`, `notification_job_runs`, `notification_dead_letters`, `notification_preferences`. Immutable UUID ids across the board.
+- **Rule engine**: 19 controlled `event_type` values × 15 `entity_type` values × 5 severities × 3 channels × 12 recipient strategies × 15 template keys. 13 default rules seeded idempotently.
+- **Deterministic events**: SHA-256 truncated `event_key` + separate `deduplication_key` — repeated events collapse into the active notification; scheduled scans are fully idempotent.
+- **Recipient resolver** walks canonical `users`, `drivers`, `owners` — no personal contact data duplicated as authoritative; snapshots stored on `notification_recipients` for delivery history only.
+- **Compliance scan** reads EB-04 licences, registrations, insurance policies → emits Due Soon / Expired / Missing. **Critical scan** reads EB-04 defects + maintenance tasks → emits Critical / High / Due Soon / Overdue. **Reconciliation** auto-resolves notifications whose source condition no longer holds.
+- **Lifecycle**: New → Active → (Acknowledged | Snoozed | Escalated | Resolved | Delivery Failed | Archived) → Reopen. Per-severity snooze ceilings (Critical 24h ↔ Info/Low 30d) enforced with HTTP 400 on excess. Escalations policy configurable per-rule; defaults defined for Due Soon, Expired, Critical Defect, Maintenance Overdue.
+- **Deliveries**: In-app real (status `Sent`), Email/SMS **Simulated** — provider `simulated`, rendered subject/body captured, no external call. Retry schedule 0/5/30/120/720 minutes with max 5 attempts → dead letter. `simulate-failure` / `simulate-success` outbox endpoints for QA.
+- **Preferences**: per-user event × channel preferences with `minimum_severity`, `digest_mode`, quiet hours. Critical alerts cannot be fully disabled by ordinary users.
+- **Scheduler abstraction**: 6 job endpoints (`compliance-scan`, `critical-scan`, `process-snoozes`, `process-escalations`, `retry-deliveries`, `reconcile`) — manual + startup-one-shot. **No live in-process cron.** Production requires a durable scheduler (Kubernetes CronJob / Cloud Scheduler). This is a **documented limitation**.
+- **Permissions**: ReadOnly = list-only; Allocator = ack; Compliance = compliance + critical scans, ack/snooze/resolve; Manager = all jobs, reopen, archive, outbox retry; Admin = full.
+- **Seed** (`_source: "seed-eb07"`): 12 fictional example notifications covering every lifecycle state (due soon, expired, missing, critical, overdue, doc under review, import validation failed, acknowledged, snoozed, escalated, failed delivery, resolved). Idempotent — no duplicates on restart.
+- **Tests**: `backend/tests/test_notifications_eb07a.py` — **40 new pytest cases**. **237 / 237 backend pytest pass** (previous 197 baseline preserved + 40 new). Two stale legacy tests in `test_driver_relationships.py` hardened to tolerate EB-06 imported drivers (only `full_name`, no `name`) — no behavioural change.
+- **Frontend intentionally NOT built** in EB-07a. Bell, Notifications Centre, cross-module indicators are deferred to EB-07b.
+- **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` bumped to `dcc-phase2-eb07a`.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

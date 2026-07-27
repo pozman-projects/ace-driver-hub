@@ -60,7 +60,7 @@ class TestBackfillLinks:
         ("tilt-trays", "driver_assigned"),
     ])
     def test_seeded_records_have_driver_id(self, admin_headers, seeded_drivers, slug, name_field):
-        names = {d["name"] for d in seeded_drivers}
+        names = {d["name"] for d in seeded_drivers if d.get("name")}
         r = requests.get(f"{API}/modules/{slug}", headers=admin_headers, timeout=20)
         assert r.status_code == 200
         rows = r.json()
@@ -153,7 +153,7 @@ class TestComplianceDriverFields:
         r = requests.get(f"{API}/compliance/expiring", headers=admin_headers, timeout=20)
         assert r.status_code == 200
         body = r.json()
-        names = {d["name"] for d in seeded_drivers}
+        names = {d["name"] for d in seeded_drivers if d.get("name")}
         seen_driver_id = False
         for rec in body["records"]:
             assert "driver_id" in rec

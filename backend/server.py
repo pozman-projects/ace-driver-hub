@@ -510,6 +510,15 @@ async def on_startup():
     # --- EB-06 Guided Spreadsheet Import ---
     from imports_module import ensure_indexes as imp_ensure_indexes
     await imp_ensure_indexes(db)
+    # --- EB-07a Notifications, Alerts & Escalation Engine ---
+    from notifications_module import (
+        ensure_indexes as notif_ensure_indexes,
+        seed_rules as notif_seed_rules,
+        seed_examples as notif_seed_examples,
+    )
+    await notif_ensure_indexes(db)
+    await notif_seed_rules(db)
+    await notif_seed_examples(db)
 
 
 # Include router and CORS
@@ -534,6 +543,10 @@ app.include_router(build_documents_router(db, get_current_user))
 # --- EB-06 Imports router ---
 from imports_module import build_imports_router  # noqa: E402
 app.include_router(build_imports_router(db, get_current_user))
+
+# --- EB-07a Notifications router ---
+from notifications_module import build_notifications_router  # noqa: E402
+app.include_router(build_notifications_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

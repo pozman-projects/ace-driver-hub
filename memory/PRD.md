@@ -173,6 +173,19 @@ Modules:
 - **Tests**: `testing_agent_v3_fork` — iteration_6 (full flow: 77 PASS, 0 console errors) → iteration_7 (targeted re-verification of two low-priority fixes: PASS). Backend pytest remains at **237/237**.
 - **No external providers activated**, **no live cron loop**, **no real ACE data imported**, **no production deploy**, `main` untouched. `/app/VERSION` → `dcc-phase2-eb07b`.
 
+### Phase 2 · EB-08 Automated Driver Code & Dispatch Number Allocation (2026-07-27)
+- **3 canonical collections**: `number_sequences`, `number_allocation_events`, `dispatch_number_reservations` (immutable UUIDs, audit fields).
+- **Atomic Driver Code allocation** via `findOneAndUpdate($inc)` — safe against concurrent double-allocation (verified with a 5-way concurrent pytest).
+- **Rules**: automatic sequence initialised from `max(existing integer driver_code)+1`; manual historical override never advances; explicit live override advances to `max(current, override)`; duplicate rejects with HTTP 409.
+- **Dispatch**: 0 and 13 are permanently reserved (HTTP 400 on any attempt); reusable-first then next-new suggestion; inactive numbers count down from 999 → 100; historical assignment snapshots preserved.
+- **Reservations** with configurable TTL (default 15 min); `expire-reservations` job flips stale rows and emits a dedup-safe notification. `reconcile` job detects duplicate dispatch + sequence drift, idempotent across repeated runs.
+- **~15 new routes** under `/api/numbering/…`. Role gating: ReadOnly=0, Compliance=read-only, Allocator=reserve, Manager=jobs, Admin=sequence-edit.
+- **Notifications**: reservation-expiry + reconciliation-conflict events via EB-07 engine, dedup-safe.
+- **Frontend**: new `/administration/numbering` page (sequence, dispatch stats, reusable pills, permanent-reserved pills, active reservations table, recent events, Expire/Reconcile buttons — role-gated). Driver Register Add/Edit dialog gains `DriverCodeAssist` (Suggest + Automatic badge + historical / advance warnings) and `DispatchAssist` (reusable list, next-new, permanent 0/13 warning + submit block). `IdentifierCard` on DriverProfile with code/dispatch/source/history-count and Numbering-admin deep-link.
+- **Seed** (`_source: "seed-eb08"`) covers all 11 required scenarios; idempotent across restart.
+- **Tests**: `backend/tests/test_numbering_eb08.py` — **33 new pytest cases**. Backend total **270/270 PASS**. Frontend `testing_agent_v3_fork` iteration_8 — **10/10 PASS**, zero console errors on 8 sanity routes.
+- **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` → `dcc-phase2-eb08`.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

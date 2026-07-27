@@ -432,9 +432,10 @@ function IdentifierCard({ driver }) {
   const isInactive = !Number.isNaN(dispNum) && dispNum >= 100 && dispNum <= 999
     && (driver.driver_status === "Inactive" || driver.driver_status === "Archived");
   const dcEvent = history.find((h) => h.identifier_type === "Driver Code");
+  const isImported = !!driver._import_job_id || driver._source === "import";
   const source = dcEvent
-    ? (dcEvent.automatic ? "Automatic" : dcEvent.manual_override ? "Manual" : "Imported")
-    : "Imported";
+    ? (dcEvent.automatic ? "Automatic" : dcEvent.manual_override ? "Manual" : "System")
+    : (isImported ? "Imported" : "Manual");
   return (
     <section className="mb-6 bg-white border border-slate-200 rounded-xl p-4 shadow-sm" data-testid="driver-identifier-card">
       <div className="flex items-center justify-between mb-3">

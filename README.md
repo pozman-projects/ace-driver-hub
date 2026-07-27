@@ -1232,3 +1232,133 @@ copied master fields)
 - No real ACE data was imported. No Production deployment
   occurred. `main` remains untouched.
 
+## Phase 2 · EB-08 — Automated Driver Code & Dispatch Number Allocation — 2026-07-27
+
+Canonical numbering service, atomic Driver Code allocation, Dispatch
+Number availability rules, and a role-gated Numbering Administration
+page. Backend fully unit-tested (33 new pytest cases); frontend
+verified end-to-end via `testing_agent_v3_fork` (10/10 checkpoints
+PASS, zero console errors).
+
+### Rules implemented
+- **Driver Code sequence** — auto-initialised from
+  `max(existing integer driver_code) + 1`. Atomic advance via
+  `findOneAndUpdate({key}, {$inc: {value: 1}})` — safe against
+  concurrent allocations (verified by a 5-way concurrent pytest).
+- **Manual historical override** (integer value ≤ current sequence
+  or non-integer) never advances the sequence.
+- **Manual live override** (`historical: false`, integer > sequence)
+  advances the sequence to `max(current, override)`.
+- Archived Driver Codes are not reused by the automatic path.
+- Duplicate manual Driver Code returns HTTP 409.
+- **Dispatch Numbers 0 and 13 are permanently reserved** — rejected
+  at every write path (HTTP 400) with an immutable audit row.
+- **Reusable Dispatch Numbers** = gaps in `[1, max_active]` not
+  currently held; **Next new** = first unblocked number above the
+  active max.
+- **Inactive Dispatch Numbers** allocated downward from 999 → 100;
+  unique across drivers.
+- **Reservation TTL** default 15 min (configurable), atomic
+  duplicate check, `expire-reservations` job flips stale rows to
+  `Expired` and emits a dedup-safe notification.
+- **Reconcile** job detects duplicate active dispatch numbers and
+  sequence drift; emits one deduplicated in-app notification per
+  conflict; idempotent (verified in pytest).
+
+### Collections added
+- `number_sequences` (single-row per key, atomic counter)
+- `number_allocation_events` (append-only audit)
+- `dispatch_number_reservations` (holds active + expired reservations
+  for both Driver Codes and Dispatch Numbers)
+
+### Routes added (all `/api/…`)
+Driver Code (7): `GET /numbering/driver-code/suggestion`,
+`POST /numbering/driver-code/{reserve|release|consume}`,
+`GET/PUT /numbering/driver-code/sequence` (PUT is Admin-only).
+Dispatch (7): `GET /numbering/dispatch/available`,
+`POST /numbering/dispatch/{reserve|release|consume|allocate-inactive|reactivate}`,
+`GET /numbering/dispatch/reservations`.
+History (2): `GET /numbering/allocation-events`,
+`GET /numbering/drivers/{driver_id}/history`.
+Jobs (2): `POST /numbering/jobs/{expire-reservations|reconcile}`.
+
+### Permissions
+| Role | Read | Reserve | Sequence edit | Jobs |
+| --- | :-: | :-: | :-: | :-: |
+| ReadOnly | ✕ (403) | ✕ | ✕ | ✕ |
+| Compliance | ✓ | ✕ | ✕ | ✕ |
+| Allocator | ✓ | ✓ | ✕ | ✕ |
+| Manager | ✓ | ✓ | ✕ | ✓ |
+| Admin | ✓ | ✓ | ✓ | ✓ |
+
+### Frontend
+- **Numbering Administration page** at `/administration/numbering`
+  with sequence readout, dispatch counters, reusable-pool pills,
+  active reservations table, recent allocation events, and job
+  buttons (role-gated).
+- **DriverCodeAssist** in the Register Add/Edit dialog: Suggest
+  chip, Automatic badge, historical-note, sequence-advance warning.
+- **DispatchAssist** in the same dialog: reusable-number pills,
+  next-new button, red warning + submit block for permanently
+  reserved 0 and 13.
+- **IdentifierCard** on `/drivers/:id` with Driver Code, Dispatch
+  Number, source label, allocation-history count, and deep-link to
+  the admin page.
+
+### Notification integration (EB-07)
+- Reservation expiry → in-app notification via
+  `ManualNotification` event, deduplicated by `reservation_id`.
+- Reconciliation conflict / duplicate active dispatch →
+  deduplicated in-app alerts keyed by `dispatch-<number>`.
+- Idempotent across repeated jobs (verified in pytest).
+
+### Seed
+- `_source: "seed-eb08"` covering all 11 required scenarios
+  (automatic, historical manual, reusable, next-new, inactive 999,
+  active reservation, expired reservation, rejected 0, rejected 13,
+  manual override no-advance, sequence-not-advanced). Idempotent
+  across restart.
+
+### Testing
+- Backend: `backend/tests/test_numbering_eb08.py` — **33 new
+  pytest cases**. Full suite: **270/270 PASS** (previous 237 + 33
+  new). Zero regression.
+- Frontend: `testing_agent_v3_fork` iteration_8 — **10/10
+  checkpoints PASS**, zero console errors across 8 sanity routes.
+  Reserved 0/13 blocked in UI + backend. Manual historical override
+  verified to NOT advance the sequence. Manager and ReadOnly role
+  visibility validated.
+
+### Files added
+- `backend/numbering_module.py`
+- `backend/tests/test_numbering_eb08.py`
+- `frontend/src/pages/NumberingAdmin.jsx`
+
+### Files modified
+- `backend/server.py` (startup + router include)
+- `frontend/src/App.js` (route `/administration/numbering`)
+- `frontend/src/pages/RegisterPage.jsx`
+  (DriverCodeAssist + DispatchAssist injected into RecordDialog;
+  0/13 client-side reject in `handle()` submit)
+- `frontend/src/pages/DriverProfile.jsx` (IdentifierCard)
+- `README.md`, `memory/PRD.md`, `VERSION` → `dcc-phase2-eb08`
+
+### Known limitations / Production requirements
+- The frontend Add-Driver dialog **does not yet call
+  `reserve` / `consume` / `release`** through the numbering
+  service — it only fetches suggestions and validates client-side.
+  The full reservation lifecycle is exposed via the API and covered
+  by pytest; wiring it into the UI is a future polish item so a
+  Driver create failure automatically releases the reservation.
+- Sequence edit uses a `window.prompt` — accessible but not
+  test-selectable. A proper dialog with `data-testid` is a future
+  polish item.
+- No live cron. Production must invoke `expire-reservations` and
+  `reconcile` from a durable scheduler.
+- Import framework does not automatically write allocation events
+  on committed rows yet — imports still remain sequence-safe
+  because historical integer values do not advance the sequence
+  pointer under the current rules.
+- **No external providers activated**, **no real ACE data
+  imported**, **no production deploy**, `main` untouched.
+

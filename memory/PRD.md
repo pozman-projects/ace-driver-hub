@@ -224,6 +224,22 @@ Modules:
 - "Generate Driver Start Sheet" and "Export Driver Profile" utilities are visibly marked **Unavailable** on the DCC — no fake success flows.
 - A pre-existing React hydration warning on `/relationships/driver-*` pages (`<span>` inside `<option>`) surfaced during EB-09 QA; it does not affect DCC and is filed as an optional non-EB-09 cleanup.
 
+### Phase 2 · EB-09.1 Hardening & Maintainability (2026-07-28)
+- **Relationships hydration warning FIXED** in `RelationshipPage.jsx`. Root cause: line 207 mixed a dynamic expression (`{cfg.activeLabel}`) with static text (` only`) inside a native `<option>`. The dev toolchain wraps standalone dynamic expressions in a `<span style="display:contents">` for source-tracking, which triggered React's "cannot be a child of `<option>`" hydration error. Fix: coalesce to a single template literal `{`${cfg.activeLabel} only`}` so no wrapper span is injected. Verified across all three `/relationships/*` pages — **0 hydration warnings, 0 console errors**. No other behaviour changed.
+- **`DriverCommandCentre.jsx` refactored from 1173 → 140 lines** (~-88%). All cards extracted to `/app/frontend/src/components/driver-cc/`:
+  - `driverCCUtils.jsx` — shared constants (`ROLE_CAN_EDIT`, `ROLE_CAN_EDIT_ACCOUNT`), helpers (`statusVariant`), and reusable primitives (`ManagementRow`, `ManagementCard`, `RightCard`, `InlineField`, `EditInput`, `ToggleRow`, `HeaderBadge`, `MiniStat`, `StatusPill`)
+  - `DriverCCHeader.jsx`, `DriverCCLoadingState.jsx`, `DriverCCErrorState.jsx`
+  - Row 1: `DriverDetailsCard.jsx` · `AccountDetailsCard.jsx` · `DriverSetupCard.jsx`
+  - Row 2: `CommunicationCard.jsx` · `CarrierEquipmentCard.jsx` · `OwnerDetailsCard.jsx`
+  - Row 3: `AdminUtilitiesCard.jsx` · `ActivationChecklistCard.jsx` · `DriverNotesCard.jsx`
+  - Right column: `ComplianceOverviewCard.jsx` · `DriverLicenceCard.jsx` · `TruckRegistrationCard.jsx` · `TruckInsuranceCard.jsx` · `VehicleComplianceCard.jsx` · `DocumentsPassesPhotosCard.jsx`
+- **Zero behaviour changes** — preserved `/drivers/:id`, `?view=legacy`, `?section=`, per-card edit lifecycle (Save/Cancel/dirty warn), role filtering, deep-linking, empty states, sticky right column, layout, spacing, labels, card order, and all 34 `data-testid` selectors. Single aggregator endpoint still serves the whole page; no duplicate API calls introduced.
+- **No backend changes**. Backend suite remains **287/287 PASS** (39+34+28+17+19+20+40+33+33+24 across per-file runs).
+- Frontend lint clean; smoke screenshot confirms identical render.
+- **Files added (18):** `frontend/src/components/driver-cc/*.jsx`.
+- **Files changed (4):** `frontend/src/pages/DriverCommandCentre.jsx` (1173→140), `frontend/src/pages/RelationshipPage.jsx`, `VERSION`, `README.md`, `memory/PRD.md`.
+- **No** external providers, **no** real ACE data, **no** production deploy, `main` untouched. `/app/VERSION` → `dcc-phase2-eb09-1`.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

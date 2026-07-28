@@ -204,7 +204,7 @@ export default function RelationshipPage() {
               className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors"
             >
               <option value="all">All</option>
-              <option value="active">{cfg.activeLabel} only</option>
+              <option value="active">{`${cfg.activeLabel} only`}</option>
               <option value="history">Historical only</option>
             </select>
             <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">

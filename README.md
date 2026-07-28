@@ -1444,3 +1444,93 @@ API, record and test.
   `/relationships/driver-*` pages (not EB-09; filed as optional cleanup).
 - **No external providers activated**, **no real ACE data imported**,
   **no production deploy**, `main` untouched. Working tree only.
+
+---
+
+## Phase 2 · EB-09.1 — Hardening & Maintainability — 2026-07-28
+
+### Objective
+Two targeted, behaviour-preserving improvements. No new business features.
+
+1. Fix the pre-existing hydration warning on the `/relationships/*` pages.
+2. Refactor the ~1173-line `DriverCommandCentre.jsx` into maintainable
+   components while preserving every behaviour, label and test-id.
+
+### Task 1 — Relationships hydration warning
+- Root cause: `RelationshipPage.jsx:207` mixed a dynamic expression
+  (`{cfg.activeLabel}`) with static text (` only`) inside a native `<option>`.
+  The dev toolchain injected a `<span style="display:contents">` around the
+  standalone expression for source-tracking, which triggered React's
+  "In HTML, `<span>` cannot be a child of `<option>`" hydration error.
+- Fix (one line): coalesce to a single template literal
+  `{`${cfg.activeLabel} only`}` so the dynamic + static parts form one
+  expression and no wrapper span is injected.
+- Verified on `/relationships/driver-owner`, `/relationships/driver-vehicle`,
+  `/relationships/driver-equipment` — **0 hydration warnings, 0 console
+  errors**. All controls (search, filter select, Add, Edit, Reassign,
+  Archive, View) behave identically.
+
+### Task 2 — Driver Command Centre refactor
+- Before: `DriverCommandCentre.jsx` = 1173 lines.
+- After:  `DriverCommandCentre.jsx` = **140 lines** (~-88%). Now a pure page
+  shell that loads the aggregator and composes the extracted cards.
+- 18 new component files under `/app/frontend/src/components/driver-cc/`:
+  - `driverCCUtils.jsx` — constants + helpers + shared primitives
+    (ManagementCard, RightCard, InlineField, EditInput, ToggleRow,
+    HeaderBadge, MiniStat, StatusPill, statusVariant, ROLE_CAN_EDIT,
+    ROLE_CAN_EDIT_ACCOUNT, ManagementRow)
+  - `DriverCCHeader.jsx`
+  - `DriverCCLoadingState.jsx` (SkeletonRow, SkeletonRight)
+  - `DriverCCErrorState.jsx`
+  - Row 1: `DriverDetailsCard.jsx`, `AccountDetailsCard.jsx`,
+    `DriverSetupCard.jsx`
+  - Row 2: `CommunicationCard.jsx`, `CarrierEquipmentCard.jsx`,
+    `OwnerDetailsCard.jsx`
+  - Row 3: `AdminUtilitiesCard.jsx`, `ActivationChecklistCard.jsx`,
+    `DriverNotesCard.jsx`
+  - Right column: `ComplianceOverviewCard.jsx`, `DriverLicenceCard.jsx`,
+    `TruckRegistrationCard.jsx`, `TruckInsuranceCard.jsx`,
+    `VehicleComplianceCard.jsx`, `DocumentsPassesPhotosCard.jsx`
+
+### Preserved (nothing changed)
+- Route `/drivers/:id` and legacy fallback `?view=legacy`.
+- Section deep-linking `?section=<key>`.
+- All three Management rows and the sticky right-hand Compliance
+  Intelligence column.
+- Per-card independent Edit / Save / Cancel with dirty-state warning.
+- Role filtering (Account fields, Notes categories) — all server-side.
+- Loading skeletons, partial-card failure banner, invalid-driver redirect.
+- All labels, badges, colours, spacing, card order, and 34 `data-testid`
+  selectors.
+- Single aggregator endpoint still serves the whole page — no duplicate API
+  calls introduced. Mutations still hit the correct canonical endpoints.
+
+### Verification
+- Frontend lint: clean.
+- Backend: no changes; **287/287 tests still pass** when run per-file
+  (39 + 34 + 28 + 17 + 19 + 20 + 40 + 33 + 33 + 24). Combined-run flakes
+  originate from the external URL under concurrent load, not code.
+- Smoke: relationships pages emit **0 hydration warnings**; DCC renders
+  identically with all 18 primary test-ids present and 0 console errors.
+
+### Files added (18)
+`frontend/src/components/driver-cc/{driverCCUtils.jsx, DriverCCHeader.jsx,
+DriverCCLoadingState.jsx, DriverCCErrorState.jsx, DriverDetailsCard.jsx,
+AccountDetailsCard.jsx, DriverSetupCard.jsx, CommunicationCard.jsx,
+CarrierEquipmentCard.jsx, OwnerDetailsCard.jsx, AdminUtilitiesCard.jsx,
+ActivationChecklistCard.jsx, DriverNotesCard.jsx,
+ComplianceOverviewCard.jsx, DriverLicenceCard.jsx, TruckRegistrationCard.jsx,
+TruckInsuranceCard.jsx, VehicleComplianceCard.jsx,
+DocumentsPassesPhotosCard.jsx}`.
+
+### Files changed (5)
+- `frontend/src/pages/DriverCommandCentre.jsx` (1173 → 140 lines)
+- `frontend/src/pages/RelationshipPage.jsx` (option label fix)
+- `VERSION` → `dcc-phase2-eb09-1`
+- `README.md` (this section)
+- `memory/PRD.md` (changelog)
+
+### Known limitations / Production requirements
+- Same as EB-09 — none re-opened, none introduced.
+- **No external providers activated**, **no real ACE data imported**,
+  **no production deploy**, `main` untouched. Working tree only.

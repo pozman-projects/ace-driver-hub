@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Navigate, Link } from "react-router-dom";
 import AppHeader from "../components/app/AppHeader";
 import OwnerSelect from "../components/app/OwnerSelect";
@@ -126,14 +126,20 @@ export default function RegisterPage() {
         const { data } = await api.post(cfg.api, payload);
         setItems((p) => [data, ...p]);
         toast.success(`${cfg.title.slice(0, -1)} added`);
+        closeDialog();
+        return data;
       } else if (mode === "edit") {
         const { data } = await api.put(`${cfg.api}/${record.id}`, payload);
         setItems((p) => p.map((it) => (it.id === data.id ? data : it)));
         toast.success("Updated");
+        closeDialog();
+        return data;
       }
       closeDialog();
+      return null;
     } catch (e) {
-      toast.error(formatApiErrorDetail(e?.response?.data?.detail));
+      // Re-raise so RecordDialog can release reservations
+      throw e;
     }
   };
 
@@ -420,6 +426,8 @@ function Cell({ col, row, ownersById, slug }) {
 
 function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
   const isView = mode === "view";
+  const isDrivers = cfg.slug === "drivers";
+  const isCreate = mode === "create";
   const [form, setForm] = useState(() =>
     Object.fromEntries(
       cfg.fields.map((f) => [
@@ -430,17 +438,70 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
   );
   const [submitting, setSubmitting] = useState(false);
 
+  // ── EB-08 reservation lifecycle (drivers · create only) ───────────
+  const [dcRes, setDcRes] = useState(null);      // {reservation_id, identifier_value, expires_at, automatic, sequence_advanced, manual_override}
+  const [dispRes, setDispRes] = useState(null);
+  const [resError, setResError] = useState(null); // { kind, message } — blocks save
+  const dcResRef = useRef(null);
+  const dispResRef = useRef(null);
+  useEffect(() => { dcResRef.current = dcRes; }, [dcRes]);
+  useEffect(() => { dispResRef.current = dispRes; }, [dispRes]);
+
+  const releaseNow = useCallback(async (reason) => {
+    const dc = dcResRef.current;
+    const dp = dispResRef.current;
+    if (dc?.reservation_id) {
+      try { await api.post("/numbering/driver-code/release", { reservation_id: dc.reservation_id, reason }); } catch { /* fire-and-forget */ }
+    }
+    if (dp?.reservation_id) {
+      try { await api.post("/numbering/dispatch/release", { reservation_id: dp.reservation_id, reason }); } catch { /* fire-and-forget */ }
+    }
+    dcResRef.current = null;
+    dispResRef.current = null;
+    setDcRes(null);
+    setDispRes(null);
+  }, []);
+
+  // Release on unmount / route change / cancel
+  useEffect(() => {
+    return () => {
+      // Fire-and-forget release; the ref carries the latest state
+      const dc = dcResRef.current;
+      const dp = dispResRef.current;
+      if (dc?.reservation_id) {
+        api.post("/numbering/driver-code/release", { reservation_id: dc.reservation_id, reason: "Dialog closed" }).catch(() => {});
+      }
+      if (dp?.reservation_id) {
+        api.post("/numbering/dispatch/release", { reservation_id: dp.reservation_id, reason: "Dialog closed" }).catch(() => {});
+      }
+    };
+  }, []);
+
+  const closeAndRelease = useCallback(() => {
+    // Fire-and-forget, unmount effect also runs — safe
+    onClose();
+  }, [onClose]);
+
   const handle = async (e) => {
     e.preventDefault();
     if (isView) return;
-    // EB-08 client-side guard: block permanently reserved dispatch numbers
-    if (cfg.slug === "drivers" && form.dispatch_number) {
+
+    // 0/13 client-side guard (belt & braces — reserve endpoint also blocks)
+    if (isDrivers && form.dispatch_number != null && form.dispatch_number !== "") {
       const n = parseInt(String(form.dispatch_number).trim(), 10);
       if (n === 0 || n === 13) {
         toast.error(`Dispatch Number ${n} is permanently reserved and cannot be allocated.`);
         return;
       }
     }
+
+    // Block save if a reservation has expired without a fresh one
+    if (isDrivers && isCreate && resError) {
+      toast.error(resError.message || "Please re-select the identifier before saving.");
+      return;
+    }
+
+    // Build the sanitised payload
     const clean = {};
     for (const f of cfg.fields) {
       const v = form[f.key];
@@ -452,8 +513,94 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
         clean[f.key] = v;
       }
     }
+
     setSubmitting(true);
-    await onSubmit(mode, record, clean);
+
+    // ── EB-08 · reserve any missing values just-in-time ──
+    let createdDcRes = null;
+    let createdDispRes = null;
+    if (isDrivers && isCreate) {
+      try {
+        const dcVal = clean.driver_code != null ? String(clean.driver_code).trim() : "";
+        const dc = dcResRef.current;
+        if (dcVal && (!dc || String(dc.identifier_value) !== dcVal)) {
+          // The user typed a manual value that isn't the current reservation
+          if (dc?.reservation_id) {
+            await api.post("/numbering/driver-code/release", { reservation_id: dc.reservation_id, reason: "Manual override before save" }).catch(() => {});
+            setDcRes(null); dcResRef.current = null;
+          }
+          const isIntDc = /^\d+$/.test(dcVal);
+          if (isIntDc) {
+            const { data } = await api.post("/numbering/driver-code/reserve", {
+              value: dcVal, manual_override: true, historical: true,
+            });
+            createdDcRes = data;
+            setDcRes(data); dcResRef.current = data;
+          }
+          // Non-int codes are historical identity strings — no reservation
+        }
+        const dispVal = clean.dispatch_number != null ? String(clean.dispatch_number).trim() : "";
+        const dp = dispResRef.current;
+        if (dispVal && (!dp || String(dp.identifier_value) !== dispVal)) {
+          if (dp?.reservation_id) {
+            await api.post("/numbering/dispatch/release", { reservation_id: dp.reservation_id, reason: "Manual override before save" }).catch(() => {});
+            setDispRes(null); dispResRef.current = null;
+          }
+          const { data } = await api.post("/numbering/dispatch/reserve", {
+            value: dispVal, manual_override: true,
+          });
+          createdDispRes = data;
+          setDispRes(data); dispResRef.current = data;
+        }
+      } catch (err) {
+        const detail = err?.response?.data?.detail;
+        if (err?.response?.status === 409) {
+          toast.error(`Conflict: ${detail || "another user reserved this value"}. Refreshing suggestions.`);
+          setResError({ kind: "conflict", message: detail || "Reservation conflict — pick another value." });
+          // Force fresh suggestions
+          try { window.dispatchEvent(new Event("numbering:refresh")); } catch { /* ignore */ }
+        } else {
+          toast.error(detail || "Reservation failed");
+        }
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    // ── Perform the create/edit ──
+    let created = null;
+    try {
+      created = await onSubmit(mode, record, clean);
+    } catch (err) {
+      // Save failed — release any reservations we hold, preserve form values
+      await releaseNow("Driver save failed");
+      toast.error(formatApiErrorDetail(err?.response?.data?.detail) || "Save failed");
+      setSubmitting(false);
+      return;
+    }
+
+    // ── Consume reservations on success ──
+    if (isDrivers && isCreate) {
+      const driverId = created?.id;
+      const dc = dcResRef.current;
+      const dp = dispResRef.current;
+      // Note: consume can no-op safely (409 on double-consume tolerated)
+      if (dc?.reservation_id && driverId) {
+        try {
+          await api.post("/numbering/driver-code/consume", { reservation_id: dc.reservation_id, driver_id: driverId });
+        } catch { /* keep going — audit event is best-effort here */ }
+      }
+      if (dp?.reservation_id && driverId) {
+        try {
+          await api.post("/numbering/dispatch/consume", { reservation_id: dp.reservation_id, driver_id: driverId });
+        } catch { /* keep going */ }
+      }
+      dcResRef.current = null;
+      dispResRef.current = null;
+      setDcRes(null);
+      setDispRes(null);
+    }
+
     setSubmitting(false);
   };
 
@@ -529,15 +676,22 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
                   {cfg.slug === "drivers" && f.key === "driver_code" && !isView && (
                     <DriverCodeAssist
                       value={form[f.key] || ""}
-                      onFill={(v, meta) => setForm((p) => ({ ...p, [f.key]: v, __driver_code_meta: meta }))}
-                      currentMeta={form.__driver_code_meta}
+                      isCreate={isCreate}
+                      reservation={dcRes}
+                      onReserve={setDcRes}
+                      onFill={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
+                      onResError={setResError}
                     />
                   )}
                   {cfg.slug === "drivers" && f.key === "dispatch_number" && !isView && (
                     <DispatchAssist
                       value={form[f.key] || ""}
                       driverId={record?.id}
+                      isCreate={isCreate}
+                      reservation={dispRes}
+                      onReserve={setDispRes}
                       onFill={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
+                      onResError={setResError}
                     />
                   )}
                 </>
@@ -572,68 +726,146 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
 }
 
 
-// EB-08 · Driver Code assistant — Suggest button + sequence-impact readout
-function DriverCodeAssist({ value, onFill, currentMeta }) {
+// EB-08 · Driver Code assistant — Suggest + reserve; sequence-impact readout
+function DriverCodeAssist({ value, isCreate, reservation, onReserve, onFill, onResError }) {
   const [suggestion, setSuggestion] = React.useState(null);
   const [sequence, setSequence] = React.useState(null);
-  React.useEffect(() => {
-    api.get("/numbering/driver-code/suggestion")
-      .then(({ data }) => setSuggestion(data)).catch(() => {});
-    api.get("/numbering/driver-code/sequence")
-      .then(({ data }) => setSequence(data)).catch(() => {});
+  const [busy, setBusy] = React.useState(false);
+  const refresh = React.useCallback(() => {
+    api.get("/numbering/driver-code/suggestion").then(({ data }) => setSuggestion(data)).catch(() => {});
+    api.get("/numbering/driver-code/sequence").then(({ data }) => setSequence(data)).catch(() => {});
   }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  React.useEffect(() => {
+    const h = () => refresh();
+    window.addEventListener("numbering:refresh", h);
+    return () => window.removeEventListener("numbering:refresh", h);
+  }, [refresh]);
+
   const parsedVal = value ? parseInt(String(value).trim(), 10) : NaN;
   const isIntShaped = !Number.isNaN(parsedVal) && String(parsedVal) === String(value).trim();
   const seqVal = sequence?.value ?? 0;
   const willAdvance = isIntShaped && parsedVal > seqVal;
   const isHistorical = isIntShaped && parsedVal <= seqVal;
-  const isAuto = suggestion && String(value).trim() === String(suggestion.suggested_driver_code);
+  const isAuto = !!reservation?.automatic && String(reservation.identifier_value) === String(value).trim();
+
+  const clickSuggest = async () => {
+    if (busy || !isCreate) return;
+    setBusy(true);
+    try {
+      // If we already hold a reservation, release it first
+      if (reservation?.reservation_id) {
+        await api.post("/numbering/driver-code/release", { reservation_id: reservation.reservation_id, reason: "Re-suggest" }).catch(() => {});
+      }
+      const { data } = await api.post("/numbering/driver-code/reserve", {});
+      onReserve(data);
+      onFill(String(data.identifier_value));
+      onResError && onResError(null);
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(detail || "Could not reserve automatic Driver Code");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]" data-testid="driver-code-assist">
-      <button
-        type="button"
-        onClick={() => onFill(String(suggestion?.suggested_driver_code || ""), { automatic: true })}
-        disabled={!suggestion}
-        data-testid="driver-code-suggest"
-        className="inline-flex items-center gap-1 border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800 disabled:opacity-40"
-      >
-        Suggest {suggestion ? `→ ${suggestion.suggested_driver_code}` : "…"}
-      </button>
-      {isAuto && (
-        <span data-testid="driver-code-automatic-badge"
-          className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
-          Automatic
-        </span>
-      )}
-      {!isAuto && value && (
-        <span className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
-          Manual Override
-        </span>
-      )}
+    <div className="mt-2 space-y-1.5" data-testid="driver-code-assist">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <button
+          type="button"
+          onClick={clickSuggest}
+          disabled={!suggestion || busy || !isCreate}
+          data-testid="driver-code-suggest"
+          className="inline-flex items-center gap-1 border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800 disabled:opacity-40"
+        >
+          {busy ? "Reserving…" : `Suggest${suggestion ? ` → ${suggestion.suggested_driver_code}` : ""}`}
+        </button>
+        {isAuto && (
+          <span data-testid="driver-code-automatic-badge"
+            className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
+            Automatic
+          </span>
+        )}
+        {!isAuto && value && isHistorical && (
+          <span data-testid="driver-code-manual-badge"
+            className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+            Historical Manual
+          </span>
+        )}
+        {!isAuto && value && willAdvance && (
+          <span data-testid="driver-code-live-badge"
+            className="inline-flex text-[9px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-700">
+            Live Manual Override
+          </span>
+        )}
+        {reservation?.expires_at && isAuto && (
+          <ReservationCountdown reservationId={reservation.reservation_id}
+            expiresAt={reservation.expires_at} onExpire={() => {
+              onReserve(null);
+              onFill("");
+              onResError && onResError({ kind: "expired", message: "Driver Code reservation expired — re-suggest before saving." });
+              refresh();
+            }} testid="driver-code-countdown" />
+        )}
+      </div>
       {willAdvance && (
-        <span data-testid="driver-code-warn-advance" className="text-amber-700">
+        <div data-testid="driver-code-warn-advance" className="text-[11px] text-red-700">
           Warning: this value is above the live sequence ({seqVal}) — saving may advance the sequence.
-        </span>
+        </div>
       )}
       {isHistorical && !isAuto && (
-        <span data-testid="driver-code-historical-note" className="text-slate-500">
+        <div data-testid="driver-code-historical-note" className="text-[11px] text-slate-500">
           Historical value — sequence pointer will not advance.
-        </span>
+        </div>
       )}
     </div>
   );
 }
 
-// EB-08 · Dispatch Number assistant — reusable pool, next-new, 0/13 guard
-function DispatchAssist({ value, driverId, onFill }) {
+// EB-08 · Dispatch Number assistant — reusable pool, next-new, reserve on select
+function DispatchAssist({ value, driverId, isCreate, reservation, onReserve, onFill, onResError }) {
   const [avail, setAvail] = React.useState(null);
-  const [reserved, setReserved] = React.useState(false);
-  React.useEffect(() => {
-    api.get("/numbering/dispatch/available")
-      .then(({ data }) => setAvail(data)).catch(() => {});
+  const [busy, setBusy] = React.useState(false);
+  const refresh = React.useCallback(() => {
+    api.get("/numbering/dispatch/available").then(({ data }) => setAvail(data)).catch(() => {});
   }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+  React.useEffect(() => {
+    const h = () => refresh();
+    window.addEventListener("numbering:refresh", h);
+    return () => window.removeEventListener("numbering:refresh", h);
+  }, [refresh]);
   const parsedVal = value ? parseInt(String(value).trim(), 10) : NaN;
   const isReserved = parsedVal === 0 || parsedVal === 13;
+
+  const reserveValue = async (n) => {
+    if (busy || !isCreate) return;
+    setBusy(true);
+    try {
+      if (reservation?.reservation_id) {
+        await api.post("/numbering/dispatch/release", { reservation_id: reservation.reservation_id, reason: "Re-select" }).catch(() => {});
+      }
+      const { data } = await api.post("/numbering/dispatch/reserve", { value: String(n), driver_id: driverId });
+      onReserve(data);
+      onFill(String(data.dispatch_number));
+      onResError && onResError(null);
+    } catch (err) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      if (status === 409) {
+        toast.error(`Conflict: ${detail}. Refreshing available list.`);
+        onResError && onResError({ kind: "conflict", message: detail });
+        onFill("");
+        refresh();
+      } else {
+        toast.error(detail || "Could not reserve Dispatch Number");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="mt-2 space-y-1.5" data-testid="dispatch-assist">
       {isReserved && (
@@ -645,10 +877,10 @@ function DispatchAssist({ value, driverId, onFill }) {
         <span className="uppercase tracking-[0.15em] text-slate-500 mr-1">Reusable</span>
         {(avail?.reusable || []).slice(0, 8).map((n) => (
           <button
-            key={n} type="button"
-            onClick={() => onFill(String(n))}
+            key={n} type="button" disabled={busy || !isCreate}
+            onClick={() => reserveValue(n)}
             data-testid={`dispatch-reuse-${n}`}
-            className="border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800"
+            className="border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800 disabled:opacity-40"
           >
             {n}
           </button>
@@ -660,17 +892,56 @@ function DispatchAssist({ value, driverId, onFill }) {
       <div className="flex flex-wrap items-center gap-2 text-[10px]">
         <span className="uppercase tracking-[0.15em] text-slate-500">Next new</span>
         <button type="button"
-          onClick={() => avail?.next_new && onFill(String(avail.next_new))}
-          disabled={!avail?.next_new}
+          onClick={() => avail?.next_new && reserveValue(avail.next_new)}
+          disabled={!avail?.next_new || busy || !isCreate}
           data-testid="dispatch-next-new"
           className="border border-slate-200 hover:border-cyan-400 rounded-full px-2 py-0.5 text-slate-700 hover:text-cyan-800 disabled:opacity-40"
         >
-          {avail?.next_new || "—"}
+          {busy ? "Reserving…" : (avail?.next_new || "—")}
         </button>
         <span className="text-slate-400">Reserved</span>
         <span className="border border-red-200 bg-red-50 text-red-700 rounded-full px-2 py-0.5">0</span>
         <span className="border border-red-200 bg-red-50 text-red-700 rounded-full px-2 py-0.5">13</span>
+        {reservation?.expires_at && (
+          <ReservationCountdown reservationId={reservation.reservation_id}
+            expiresAt={reservation.expires_at} onExpire={() => {
+              onReserve(null);
+              onFill("");
+              onResError && onResError({ kind: "expired", message: "Dispatch Number reservation expired — re-select before saving." });
+              refresh();
+            }} testid="dispatch-countdown" />
+        )}
       </div>
     </div>
+  );
+}
+
+// EB-08 · Live countdown chip. Fires onExpire once when the timer reaches 0.
+function ReservationCountdown({ reservationId, expiresAt, onExpire, testid }) {
+  const [now, setNow] = React.useState(() => Date.now());
+  const firedRef = React.useRef(false);
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  React.useEffect(() => { firedRef.current = false; }, [reservationId]);
+  const expiresMs = new Date(expiresAt).getTime();
+  const remaining = Math.max(0, Math.floor((expiresMs - now) / 1000));
+  React.useEffect(() => {
+    if (remaining === 0 && !firedRef.current) {
+      firedRef.current = true;
+      onExpire && onExpire();
+    }
+  }, [remaining, onExpire]);
+  const m = Math.floor(remaining / 60);
+  const s = String(remaining % 60).padStart(2, "0");
+  return (
+    <span
+      data-testid={testid}
+      title={`Reservation ${reservationId} expires at ${new Date(expiresAt).toLocaleTimeString()}`}
+      className={`inline-flex text-[10px] font-medium px-2 py-0.5 rounded-full border ${remaining < 60 ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}
+    >
+      {remaining === 0 ? "expired" : `${m}:${s} left`}
+    </span>
   );
 }

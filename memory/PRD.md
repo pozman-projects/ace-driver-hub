@@ -186,6 +186,18 @@ Modules:
 - **Tests**: `backend/tests/test_numbering_eb08.py` — **33 new pytest cases**. Backend total **270/270 PASS**. Frontend `testing_agent_v3_fork` iteration_8 — **10/10 PASS**, zero console errors on 8 sanity routes.
 - **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` → `dcc-phase2-eb08`.
 
+### Phase 2 · EB-08 Close-out — Full Reservation Lifecycle in Add Driver Dialog (2026-07-28)
+- **RecordDialog** (`/app/frontend/src/pages/RegisterPage.jsx`) now runs a strict reserve → consume / release lifecycle for both `driver_code` and `dispatch_number` on driver create:
+  - `DriverCodeAssist` **Suggest** button reserves atomically, shows the automatic badge, and renders a live `ReservationCountdown` chip (mm:ss) that fires `onExpire` at 0.
+  - `DispatchAssist` reuses the pool, offers **next new**, blocks the permanently reserved 0/13, and issues its own reservation with countdown.
+  - Re-suggesting or re-selecting releases the previous reservation first, then reserves the new value (verified network sequence: release → reserve).
+  - Manual override at submit time: if the user typed a value different from the held reservation, the dialog releases the old one and reserves the typed value just-in-time with `manual_override=true` and `historical` flag when below the sequence pointer. 409 conflicts surface a red toast + `resError` banner that blocks save until re-selection.
+  - **On successful save**, reservations are consumed via `/consume`; on failure they are released via `/release`; on dialog cancel/unmount all held reservations are released via a `useRef`-backed cleanup effect.
+  - **Race fix (iteration_9 finding)**: reservations are now snapshotted to local vars and refs cleared **before** `await onSubmit()`, so the unmount cleanup no longer double-fires `/release` in parallel with `/consume`. Verified: happy-path save network = `[driver-code/consume, dispatch/consume]` only, zero stray release calls.
+- **Frontend verification**: `testing_agent_v3_fork` iteration_9 — **10/11 checkpoints PASS** (409 conflict path deferred to backend pytest coverage as it needs two authenticated sessions). Post-fix smoke re-verified via Playwright: driver `TEST EB08 RaceFix` created with code=1026 & dispatch=4, sequence advanced correctly, `Driver added` toast displayed.
+- **Backend**: no changes — 270/270 tests still passing.
+- **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` remains `dcc-phase2-eb08`.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

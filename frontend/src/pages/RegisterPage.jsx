@@ -567,36 +567,47 @@ function RecordDialog({ cfg, mode, record, owners, onClose, onSubmit }) {
       }
     }
 
+    // ── Snapshot reservations & clear refs BEFORE onSubmit ──
+    // This prevents the unmount cleanup effect (which reads the refs) from
+    // firing spurious /release calls in parallel with our /consume calls once
+    // the parent closes the dialog on a successful save.
+    const dcSnapshot = isDrivers && isCreate ? dcResRef.current : null;
+    const dpSnapshot = isDrivers && isCreate ? dispResRef.current : null;
+    if (isDrivers && isCreate) {
+      dcResRef.current = null;
+      dispResRef.current = null;
+    }
+
     // ── Perform the create/edit ──
     let created = null;
     try {
       created = await onSubmit(mode, record, clean);
     } catch (err) {
-      // Save failed — release any reservations we hold, preserve form values
+      // Save failed — restore refs so releaseNow() can free them, then release
+      if (isDrivers && isCreate) {
+        dcResRef.current = dcSnapshot;
+        dispResRef.current = dpSnapshot;
+      }
       await releaseNow("Driver save failed");
       toast.error(formatApiErrorDetail(err?.response?.data?.detail) || "Save failed");
       setSubmitting(false);
       return;
     }
 
-    // ── Consume reservations on success ──
+    // ── Consume reservations on success (using local snapshots) ──
     if (isDrivers && isCreate) {
       const driverId = created?.id;
-      const dc = dcResRef.current;
-      const dp = dispResRef.current;
       // Note: consume can no-op safely (409 on double-consume tolerated)
-      if (dc?.reservation_id && driverId) {
+      if (dcSnapshot?.reservation_id && driverId) {
         try {
-          await api.post("/numbering/driver-code/consume", { reservation_id: dc.reservation_id, driver_id: driverId });
+          await api.post("/numbering/driver-code/consume", { reservation_id: dcSnapshot.reservation_id, driver_id: driverId });
         } catch { /* keep going — audit event is best-effort here */ }
       }
-      if (dp?.reservation_id && driverId) {
+      if (dpSnapshot?.reservation_id && driverId) {
         try {
-          await api.post("/numbering/dispatch/consume", { reservation_id: dp.reservation_id, driver_id: driverId });
+          await api.post("/numbering/dispatch/consume", { reservation_id: dpSnapshot.reservation_id, driver_id: driverId });
         } catch { /* keep going */ }
       }
-      dcResRef.current = null;
-      dispResRef.current = null;
       setDcRes(null);
       setDispRes(null);
     }

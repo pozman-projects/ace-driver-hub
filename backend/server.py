@@ -523,6 +523,10 @@ async def on_startup():
     from numbering_module import ensure_indexes as num_ensure_indexes, seed_examples as num_seed
     await num_ensure_indexes(db)
     await num_seed(db)
+    # --- EB-09 Driver Profile aggregator + notes/comms ---
+    from driver_profile_module import ensure_indexes as prof_ensure_indexes, seed_eb09
+    await prof_ensure_indexes(db)
+    await seed_eb09(db)
 
 
 # Include router and CORS
@@ -555,6 +559,10 @@ app.include_router(build_notifications_router(db, get_current_user))
 # --- EB-08 Numbering router ---
 from numbering_module import build_numbering_router  # noqa: E402
 app.include_router(build_numbering_router(db, get_current_user))
+
+# --- EB-09 Driver Profile aggregator router ---
+from driver_profile_module import build_driver_profile_router  # noqa: E402
+app.include_router(build_driver_profile_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

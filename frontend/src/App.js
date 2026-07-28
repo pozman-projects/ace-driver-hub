@@ -9,6 +9,7 @@ import Hub from "./pages/Hub";
 import ModulePage from "./pages/ModulePage";
 import Compliance from "./pages/Compliance";
 import DriverProfile from "./pages/DriverProfile";
+import DriverCommandCentre from "./pages/DriverCommandCentre";
 import RegisterPage from "./pages/RegisterPage";
 import RelationshipPage from "./pages/RelationshipPage";
 import CompliancePage from "./pages/CompliancePage";
@@ -53,7 +54,7 @@ function App() {
               path="/drivers/:driverId"
               element={
                 <ProtectedRoute>
-                  <DriverProfile />
+                  <DriverCommandCentre />
                 </ProtectedRoute>
               }
             />

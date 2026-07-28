@@ -1362,3 +1362,85 @@ Jobs (2): `POST /numbering/jobs/{expire-reservations|reconcile}`.
 - **No external providers activated**, **no real ACE data
   imported**, **no production deploy**, `main` untouched.
 
+
+---
+
+## Phase 2 · EB-09 — Final Three-Row DCC Driver Profile — 2026-07-28
+
+### Objective
+Replace the temporary canonical Driver Profile presentation with the approved
+**final three-row Driver Command Centre** interface — desktop-first at 1920 × 1080
+— using existing canonical services and adding only the minimal supporting
+canonicals needed to complete the screen. Preserve every EB-01…EB-08 route,
+API, record and test.
+
+### Delivered
+- New backend module `/app/backend/driver_profile_module.py`:
+  - **Read-only aggregator** `GET /api/drivers/{id}/command-centre-profile`
+    (driver + owner + primary vehicle + equipment set + comms preferences +
+    compliance intelligence [Worst Status Wins] + primary licence /
+    registration / insurance + inspection/defects/maintenance extras +
+    driver-and-vehicle alerts + document library + EB-08 allocation events +
+    role-filtered notes + activation summary).
+  - **Server-side role filter** for sensitive Account Details fields
+    (`business_name`, `abn`, `payroll_number`, `payment_percentage`) — stripped
+    for ReadOnly / Allocator / Compliance. Restricted list echoed in
+    `restricted_fields` so the UI can render a truthful hint.
+  - **New canonical `driver_communication_preferences`** — one active row per
+    driver, PUT-upsert. Overrides only. No real delivery.
+  - **New canonical `driver_notes` + `driver_note_versions`** — append-only
+    versioning. Backend-enforced category role gates: `Compliance` →
+    Compliance/Manager/Admin, `Accounts` → Manager/Admin. Archive is
+    Admin/Manager only.
+  - **Activation adapter** `GET /api/drivers/{id}/activation-summary` — truthful
+    read of onboarding + canonical source evidence. Legacy checkbox alone
+    cannot mark items complete.
+- Frontend: new `/app/frontend/src/pages/DriverCommandCentre.jsx` (~900 lines)
+  with header, three horizontal Management rows and a sticky right-hand
+  Compliance Intelligence column. Per-card independent Edit lifecycle.
+- Routing: `/drivers/:driverId` now points to the DCC page. Legacy
+  `DriverProfile.jsx` still available at `/drivers/:id?view=legacy`.
+- Deep-link cards via `?section=<key>`.
+
+### Tests
+- 17 new pytest cases in `backend/tests/test_driver_profile_eb09.py`.
+- **Backend total: 287 / 287 pass** (270 baseline + 17 EB-09).
+- `testing_agent_v3_fork` iteration_10: **21 / 21 verification checkpoints
+  pass** on the live frontend, zero console errors on DCC.
+
+### Files touched
+- `backend/driver_profile_module.py`  (new)
+- `backend/server.py`                 (router + startup wiring)
+- `backend/tests/test_driver_profile_eb09.py`  (new)
+- `frontend/src/pages/DriverCommandCentre.jsx` (new)
+- `frontend/src/App.js`               (route swap)
+- `memory/PRD.md`                     (changelog)
+- `VERSION`                           → `dcc-phase2-eb09`
+
+### Routes added
+- `GET  /api/drivers/{id}/command-centre-profile`
+- `GET  /api/drivers/{id}/activation-summary`
+- `GET  /api/drivers/{id}/communication-preferences`
+- `PUT  /api/drivers/{id}/communication-preferences`
+- `GET  /api/drivers/{id}/notes`
+- `GET  /api/drivers/{id}/notes/{note_id}`
+- `POST /api/drivers/{id}/notes`
+- `PUT  /api/drivers/{id}/notes/{note_id}`
+- `DELETE /api/drivers/{id}/notes/{note_id}`
+
+### Collections added
+- `driver_communication_preferences`
+- `driver_notes`
+- `driver_note_versions`
+
+### Known limitations / Production requirements
+- Communication preferences are stored, delivery is **simulated only** — no
+  real Email/SMS/Blink integration.
+- "Generate Driver Start Sheet" and "Export Driver Profile" are shown as
+  **Unavailable** on the Administration & Utilities card. No fake success.
+- Object storage remains local; malware scanning still mocked.
+- No real ACE data imported.
+- Pre-existing `<span>` inside `<option>` hydration warning on
+  `/relationships/driver-*` pages (not EB-09; filed as optional cleanup).
+- **No external providers activated**, **no real ACE data imported**,
+  **no production deploy**, `main` untouched. Working tree only.

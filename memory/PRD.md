@@ -198,6 +198,32 @@ Modules:
 - **Backend**: no changes — 270/270 tests still passing.
 - **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` remains `dcc-phase2-eb08`.
 
+### Phase 2 · EB-09 Final Three-Row Driver Command Centre Profile (2026-07-28)
+- **New backend module** `/app/backend/driver_profile_module.py` — aggregator + notes + comms + activation adapter. Wired at startup + router.
+- **Read-only aggregator**: `GET /api/drivers/{id}/command-centre-profile` returns driver, owner (via canonical relationship), primary vehicle assignment, equipment assignments, communication preferences, compliance intelligence (Worst Status Wins across driver/vehicle/equipment), primary licence/registration/insurance, vehicle inspection/defects/maintenance extras, active alerts (driver + vehicle), full document set with category-linked profile photo / driver contract / licence evidence, EB-08 allocation events, role-filtered notes, and truthful activation summary — all in one call.
+- **Sensitive Account Details** (`business_name`, `abn`, `payroll_number`, `payment_percentage`) are **stripped from the aggregator response** for ReadOnly / Allocator / Compliance roles. Restricted list is echoed in `restricted_fields`. Only Manager / Admin see raw values.
+- **New canonical collection** `driver_communication_preferences` (one active row per driver) with `GET / PUT /api/drivers/{id}/communication-preferences`. Overrides are labelled; canonical driver/owner emails remain source-of-truth. No real delivery.
+- **New canonical collections** `driver_notes` + `driver_note_versions` (append-only). CRUD at `/api/drivers/{id}/notes[...]`. **Backend-enforced category role gates**: Compliance → Compliance+Manager+Admin, Accounts → Manager+Admin. Notes are also **filtered from the aggregator** based on role — restricted categories never leave the server. Archive is Admin/Manager only.
+- **Activation adapter** (`_compute_activation_summary`) — read-only, computes mandatory items (contact details, driver_code, dispatch_number, primary_licence, owner relationship, vehicle assignment, driver contract) with truthful `source:` labels. A legacy `legacy_activation_ready` flag is cross-checked against canonical evidence; it is flagged unverified when source records are missing. `readiness` ∈ {Ready, Partial, Not Ready}.
+- **New DCC frontend page** `/app/frontend/src/pages/DriverCommandCentre.jsx` (~900 lines): header (photo, name, code, dispatch, status, company, worst status, active alerts, legacy view link, back link) + three horizontal Management rows + sticky right-hand Compliance Intelligence column. Each management card owns its own **independent edit lifecycle** (local Save/Cancel, dirty-state warn). No cross-card accidental saves.
+  - Row 1: Driver Details • Account Details (server-side restricted) • Driver Setup (with contract link + numbering history)
+  - Row 2: Communication & Integration • Car Carrier & Equipment • Owner Details (read-only)
+  - Row 3: Administration & Utilities (with clearly-marked "Unavailable" items — nothing faked) • Activation Checklist • Notes (add via UI, category dropdown respects role)
+  - Right column: Compliance Overview (Worst Status Wins explanation) • Driver Licence • Truck Registration • Truck Insurance • Vehicle Compliance • Documents/Passes/Photos
+- **Legacy fallback**: `/drivers/:id?view=legacy` still renders the previous `DriverProfile` page. Deep-link cards via `?section=<key>` (auto-scroll on load).
+- **Routing**: `/drivers/:driverId` in `App.js` now points to `DriverCommandCentre`. Old `DriverProfile.jsx` retained for legacy view.
+- **Tests**: 17 new pytest cases in `backend/tests/test_driver_profile_eb09.py` (aggregator shape, missing-driver 404, ReadOnly role stripping, Admin unrestricted, comms upsert single-record, comms ReadOnly 403, notes create+version, notes ReadOnly 403, Compliance/Accounts category gating, aggregator-level notes filtering, direct-note-get denial for wrong role, archive Admin/Manager-only, activation shape + 404 + truthful source, no `_id` leak). Backend total **287/287 PASS**.
+- **Frontend `testing_agent_v3_fork` iteration_10**: **21/21 checkpoints PASS**, zero console errors on DCC. Verified: full 3-row layout at 1920×1080, sticky right column, per-card Edit/Save/Cancel + persistence across reload, ReadOnly restriction end-to-end (stripped server response + hidden Edit button + on-card restricted note), Compliance/Accounts note category 403s, legacy fallback, deep-link `?section=notes`, invalid uuid → redirect, and full regression across EB-01..EB-08 pages.
+- **No external providers**, **no real ACE data**, **no production deploy**, `main` untouched. `/app/VERSION` → `dcc-phase2-eb09`.
+
+**Known limitations (documented, not blockers):**
+- Email / SMS delivery remains a Development Outbox simulation — Communication preferences are stored but not actually transmitted.
+- Malware scanning for uploaded evidence remains mocked.
+- Object storage remains a local filesystem abstraction.
+- No real ACE spreadsheet data imported.
+- "Generate Driver Start Sheet" and "Export Driver Profile" utilities are visibly marked **Unavailable** on the DCC — no fake success flows.
+- A pre-existing React hydration warning on `/relationships/driver-*` pages (`<span>` inside `<option>`) surfaced during EB-09 QA; it does not affect DCC and is filed as an optional non-EB-09 cleanup.
+
 ## Prioritized Backlog
 
 ### P1 (next iteration)

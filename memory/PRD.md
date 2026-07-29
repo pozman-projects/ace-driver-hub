@@ -261,3 +261,35 @@ Modules:
 - Mobile responsive driver-facing portal
 - Bulk import (CSV)
 - Reports & analytics
+
+### Phase 2 · EB-10 Driver Activation & Onboarding Gate (2026-07-28)
+- **New backend module** `/app/backend/activation_module.py` (~1150 lines). Owns the canonical readiness engine:
+  - 6 new collections: `activation_templates`, `activation_template_items`, `driver_activation_records`, `driver_activation_items`, `driver_activation_overrides`, `driver_activation_events` (append-only) plus `activation_job_runs`.
+  - ACE seed template with **28 items (22 mandatory)** covering Driver Identity, Account Setup, Driver Setup, Communication, Assignment (Owner/Vehicle), Licence & Compliance, Documents, Training, System Access.
+  - **`ActivationService` readiness engine** — template selection by (company, driver_type), applicability rules (conditional items for contractor/owner drivers), automatic source resolvers for Driver / Documents / Communication prefs / Owner relationship / Vehicle assignment / Licence (incl. expiry Due-Soon 30d) / Vehicle Registration / Vehicle Insurance / Vehicle Defect (Critical = non-overridable block) / Vehicle Maintenance (Overdue). Worst-Status-Wins.
+  - **Override lifecycle** — request (Allocator/Compliance/Manager/Admin, requires 6+ char reason + risk_acknowledgement + days within `override_max_days`) → approve (Manager+Admin, requester ≠ approver) → active → expire (auto on recalc + job) / revoke (Manager+Admin). Never mutates source compliance. Critical defects rejected at API.
+  - **Activation lifecycle** — Not Started → In Progress → Ready / Ready with Override / Activation Blocked / Activated / Deactivated / Reactivated. **Ready NEVER auto-activates** — activation is an explicit Manager+Admin action requiring valid Driver Code and (optionally) sets `driver_status="Active"`. Deactivation preserves all checklist + event history. Reactivation triggers fresh recalculation.
+  - **Under Review documents** are blocking by default (user-confirmed policy 2a). No `accepts_under_review` field.
+  - **Manager+Admin activation gate** (user-confirmed policy 1a). Allocators can complete non-Compliance manual items and request overrides but cannot activate/deactivate.
+  - **Notifications**: emits deduplicated in-app notifications for `activation.ready`, `activation.blocked`, `activation.incomplete`, `activation.override.approved`, `activation.activated`, `activation.deactivated` via EB-07 collection. Two consecutive recalcs do not create duplicates.
+  - **Events**: every state change writes an append-only `driver_activation_events` row with correlation ID, actor, before/after, item/override refs, and JSON payload.
+- **30 new API routes** at `/api/activation/...` and `/api/drivers/{id}/activation/...`. Full CRUD for templates, template items, driver activation, activation items, overrides, and admin jobs (recalculate-all, expire-overrides, reconcile).
+- **Frontend**:
+  - `ActivationChecklistCard.jsx` (EB-09 upgrade): new counters (`activation-applicable`, `activation-outstanding`, `activation-override-count`), Recalculate, Open Checklist, Activate, Deactivate. All EB-09 test-ids preserved.
+  - New `/drivers/:driverId/activation` — Full Activation Checklist page (`driver-activation-page`): grouped by category, 8 filter chips, per-item Complete / Reopen / Request Override / Revoke, pending-override queue with Approve/Reject for Manager+Admin, activate/deactivate/reactivate with explicit confirms.
+  - New `/administration/activation-templates` — list, create, clone, archive.
+  - New `/administration/activation-jobs` — list past runs, manually trigger Recalculate all / Expire overrides / Reconcile (with confirm prompt).
+- **Tests**: 25 new pytest cases in `backend/tests/test_activation_eb10.py` (templates default/create/clone/archive/role-gate, applicability, recalc idempotent, manual complete + reopen + role gates + automatic-cannot-be-manual, override full flow + non-overridable + self-approve blocked + max-days enforced, activate role gates, deactivate role gates + validation, jobs runner + readonly denied, events append-only). Backend total **312/312 PASS** (287 baseline + 25 new).
+- **Frontend `testing_agent_v3_fork` iteration_12**: all EB-10 checkpoints PASS across DCC card, full checklist page, manual/override flows, role gating, templates page, jobs page, 16-route regression sweep at 1920×1080 and 1440×900. Only observation: 1 pre-existing React key warning on `/notifications/all` — filed as non-EB-10 P2.
+- **No** external providers, **no** real ACE data, **no** production deploy, `main` untouched. `/app/VERSION` → `dcc-phase2-eb10`.
+
+**Files added (5):** `backend/activation_module.py`, `backend/tests/test_activation_eb10.py`, `frontend/src/pages/DriverActivationPage.jsx`, `frontend/src/pages/ActivationTemplatesPage.jsx`, `frontend/src/pages/ActivationJobsPage.jsx`.
+
+**Files changed (3):** `backend/server.py` (startup + router wiring), `frontend/src/components/driver-cc/ActivationChecklistCard.jsx` (upgraded card), `frontend/src/App.js` (3 new routes).
+
+**Known limitations (documented, not blockers):**
+- Templates admin lists template items but does not yet expose inline per-item CRUD in the UI (planned P1; backend endpoints already exist and are tested).
+- Notification email/SMS delivery remains simulated (dev outbox).
+- Malware scan and object storage remain mocked / local.
+- No real ACE data imported.
+- Pre-existing React key warning on `/notifications/all` ListView — non-EB-10 scope.

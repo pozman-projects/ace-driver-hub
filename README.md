@@ -1534,3 +1534,77 @@ DocumentsPassesPhotosCard.jsx}`.
 - Same as EB-09 — none re-opened, none introduced.
 - **No external providers activated**, **no real ACE data imported**,
   **no production deploy**, `main` untouched. Working tree only.
+
+---
+
+## Phase 2 · EB-10 — Driver Activation & Onboarding Gate — 2026-07-28
+
+### Objective
+Turn the EB-09 read-only activation adapter into the canonical operational
+readiness gate. Introduce a versioned template model, per-driver checklist
+instances, automatic source validation, manual completion, overrides with
+approval workflow, activation lifecycle, and full audit history.
+
+### Delivered
+- **New backend module** `/app/backend/activation_module.py`
+  - 6 canonical collections + 1 job-runs collection.
+  - `ActivationService` readiness engine with `Worst Status Wins`.
+  - 30 new API routes.
+  - Backend-enforced permission model:
+    - `Admin, Manager` — activate / deactivate / reactivate / approve
+      overrides / manage templates / run jobs.
+    - `Allocator` — complete non-Compliance manual items and request
+      overrides; **cannot** activate / deactivate.
+    - `Compliance` — complete Licence-and-Compliance and general manual
+      items; may request overrides.
+    - `ReadOnly` — view only.
+  - Category-specific gates: `Licence and Compliance` items require
+    `Compliance/Manager/Admin`; `Account Setup` items require
+    `Manager/Admin`.
+  - Under-Review documents are blocking by default (no
+    `accepts_under_review` field).
+  - Critical vehicle defects are non-overridable at API level.
+  - Ready never auto-activates.
+- **Frontend**
+  - `/drivers/:driverId` DCC — Activation card upgraded with counters,
+    Recalculate, Open Checklist, Activate, Deactivate.
+  - `/drivers/:driverId/activation` — full checklist page: header with
+    readiness pill and counters, 8 filter chips, grouped by category,
+    per-item actions (Complete, Reopen, Request Override, Revoke), pending
+    override queue with Approve/Reject.
+  - `/administration/activation-templates` — list / create / clone / archive.
+  - `/administration/activation-jobs` — list past runs; run Recalculate all,
+    Expire overrides, Reconcile (confirm-gated).
+
+### Tests
+- 25 new pytest cases in `backend/tests/test_activation_eb10.py`.
+- **Backend total: 312 / 312 pass.**
+- `testing_agent_v3_fork` iteration_12: all EB-10 checkpoints pass; 16-route
+  regression clean; zero horizontal scroll at 1920 × 1080 and 1440 × 900.
+
+### Routes added
+- Templates: `GET/POST /api/activation/templates`, `GET/PUT/DELETE /api/activation/templates/{id}`, `POST /api/activation/templates/{id}/clone`.
+- Template items: `GET/POST /api/activation/templates/{id}/items`, `PUT/DELETE /api/activation/template-items/{item_id}`.
+- Driver activation: `GET /api/drivers/{id}/activation`, `POST .../start`, `POST .../recalculate`, `POST .../activate`, `POST .../deactivate`, `POST .../reactivate`, `GET .../history`, `GET .../items`, `GET .../overrides`.
+- Items: `PUT /api/driver-activation-items/{id}/manual-complete`, `PUT .../manual-reopen`, `POST .../override-request`.
+- Overrides: `POST /api/activation-overrides/{id}/approve`, `POST .../reject`, `POST .../revoke`.
+- Jobs: `POST /api/activation/jobs/{recalculate-all|expire-overrides|reconcile}`, `GET /api/activation/jobs`.
+
+### Collections added
+- `activation_templates`
+- `activation_template_items`
+- `driver_activation_records`
+- `driver_activation_items`
+- `driver_activation_overrides`
+- `driver_activation_events` (append-only)
+- `activation_job_runs`
+
+### Known limitations / Production requirements
+- Templates admin does not yet expose per-item CRUD in the UI (backend
+  endpoints exist and are tested; scheduled as P1).
+- Notifications email/SMS delivery remains simulated (dev outbox).
+- Malware scanning and object storage remain mocked/local.
+- Real ACE data not imported.
+- Pre-existing React key warning on `/notifications/all` — non-EB-10.
+- **No external providers activated**, **no real ACE data imported**,
+  **no production deploy**, `main` untouched. Working tree only.

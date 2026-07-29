@@ -878,6 +878,7 @@ async def _emit_notification(db, rule_key: str, driver_id: str, activation_id: s
         return
     await db[NOTIFS_COLL].insert_one({
         "id": _uuid(),
+        "notification_id": _uuid(),
         "dedup_key": dedup,
         "entity_type": "Driver",
         "entity_id": driver_id,
@@ -1015,10 +1016,11 @@ def build_activation_router(db, get_current_user):
 
     # ---- Template items ----------------------------------------------------
     @router.get("/activation/templates/{tpl_id}/items")
-    async def list_items(tpl_id: str, current=Depends(get_current_user)):
-        rows = await db[TPL_ITEM_COLL].find(
-            {"activation_template_id": tpl_id, "is_archived": {"$ne": True}}, {"_id": 0},
-        ).sort("display_order", 1).to_list(1000)
+    async def list_items(tpl_id: str, include_archived: bool = False, current=Depends(get_current_user)):
+        q = {"activation_template_id": tpl_id}
+        if not include_archived:
+            q["is_archived"] = {"$ne": True}
+        rows = await db[TPL_ITEM_COLL].find(q, {"_id": 0}).sort("display_order", 1).to_list(1000)
         return rows
 
     @router.post("/activation/templates/{tpl_id}/items")
@@ -1028,6 +1030,17 @@ def build_activation_router(db, get_current_user):
             raise HTTPException(status_code=400, detail=f"category must be one of {CATEGORIES}")
         if payload.completion_type not in COMPLETION_TYPES:
             raise HTTPException(status_code=400, detail=f"completion_type must be one of {COMPLETION_TYPES}")
+        if payload.override_allowed and payload.override_max_days < 1:
+            raise HTTPException(status_code=400, detail="Override maximum days must be > 0")
+        if payload.conditional and not payload.condition_rule:
+            raise HTTPException(status_code=400, detail="Conditional items require condition_rule")
+        # Item key uniqueness within template
+        existing_key = await db[TPL_ITEM_COLL].find_one(
+            {"activation_template_id": tpl_id, "item_key": payload.item_key,
+             "is_archived": {"$ne": True}},
+        )
+        if existing_key:
+            raise HTTPException(status_code=400, detail=f"Item key '{payload.item_key}' already exists in this template")
         now = _iso()
         doc = {
             "activation_template_item_id": _uuid(),
@@ -1045,12 +1058,40 @@ def build_activation_router(db, get_current_user):
     @router.put("/activation/template-items/{item_id}")
     async def update_item(item_id: str, payload: TemplateItemPayload, current=Depends(get_current_user)):
         _require(current["role"], ROLE_MANAGE_TEMPLATES)
-        r = await db[TPL_ITEM_COLL].update_one(
+        existing = await db[TPL_ITEM_COLL].find_one({"activation_template_item_id": item_id}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Item not found")
+        if payload.category not in CATEGORIES:
+            raise HTTPException(status_code=400, detail=f"category must be one of {CATEGORIES}")
+        if payload.completion_type not in COMPLETION_TYPES:
+            raise HTTPException(status_code=400, detail=f"completion_type must be one of {COMPLETION_TYPES}")
+        if payload.override_allowed and payload.override_max_days < 1:
+            raise HTTPException(status_code=400, detail="Override maximum days must be > 0")
+        if payload.conditional and not payload.condition_rule:
+            raise HTTPException(status_code=400, detail="Conditional items require condition_rule")
+        # Critical-defect protection: source_entity_type=vehicle_defect can never become overrideable
+        if payload.source_entity_type == "vehicle_defect" and payload.override_allowed:
+            raise HTTPException(status_code=400, detail="Critical-defect items cannot be overrideable")
+        # Item key uniqueness within template (excluding self)
+        if payload.item_key != existing["item_key"]:
+            dup = await db[TPL_ITEM_COLL].find_one(
+                {"activation_template_id": existing["activation_template_id"],
+                 "item_key": payload.item_key,
+                 "activation_template_item_id": {"$ne": item_id},
+                 "is_archived": {"$ne": True}},
+            )
+            if dup:
+                raise HTTPException(status_code=400, detail=f"Item key '{payload.item_key}' already exists in this template")
+            # If the template is locked (has driver activation records), item_key changes are structural
+            locked_count = await db[REC_COLL].count_documents(
+                {"activation_template_id": existing["activation_template_id"], "is_archived": {"$ne": True}}
+            )
+            if locked_count > 0:
+                raise HTTPException(status_code=400, detail="Template is locked (in use by Drivers) — clone a new version to change item keys")
+        await db[TPL_ITEM_COLL].update_one(
             {"activation_template_item_id": item_id},
             {"$set": {**payload.model_dump(), "updated_at": _iso(), "updated_by": current["email"]}},
         )
-        if not r.matched_count:
-            raise HTTPException(status_code=404, detail="Item not found")
         return await db[TPL_ITEM_COLL].find_one({"activation_template_item_id": item_id}, {"_id": 0})
 
     @router.delete("/activation/template-items/{item_id}")
@@ -1063,6 +1104,86 @@ def build_activation_router(db, get_current_user):
         if not r.matched_count:
             raise HTTPException(status_code=404, detail="Item not found")
         return {"status": "archived"}
+
+    @router.post("/activation/template-items/{item_id}/restore")
+    async def restore_item(item_id: str, current=Depends(get_current_user)):
+        _require(current["role"], ROLE_MANAGE_TEMPLATES)
+        r = await db[TPL_ITEM_COLL].update_one(
+            {"activation_template_item_id": item_id},
+            {"$set": {"is_archived": False, "is_active": True, "updated_at": _iso(), "updated_by": current["email"]}},
+        )
+        if not r.matched_count:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return await db[TPL_ITEM_COLL].find_one({"activation_template_item_id": item_id}, {"_id": 0})
+
+    @router.post("/activation/template-items/{item_id}/duplicate")
+    async def duplicate_item(item_id: str, current=Depends(get_current_user)):
+        _require(current["role"], ROLE_MANAGE_TEMPLATES)
+        src = await db[TPL_ITEM_COLL].find_one({"activation_template_item_id": item_id}, {"_id": 0})
+        if not src:
+            raise HTTPException(status_code=404, detail="Item not found")
+        # Unique key
+        base_key = src["item_key"]
+        suffix = 1
+        new_key = f"{base_key}.copy{suffix}"
+        while await db[TPL_ITEM_COLL].find_one(
+            {"activation_template_id": src["activation_template_id"], "item_key": new_key}
+        ):
+            suffix += 1
+            new_key = f"{base_key}.copy{suffix}"
+        now = _iso()
+        new_item = {**src, "activation_template_item_id": _uuid(),
+                     "item_key": new_key, "label": f"{src['label']} (Copy)",
+                     "display_order": src.get("display_order", 0) + 1,
+                     "created_at": now, "updated_at": now,
+                     "created_by": current["email"], "updated_by": current["email"],
+                     "is_archived": False, "is_active": True}
+        new_item.pop("_id", None)
+        # Shift subsequent items to make room
+        await db[TPL_ITEM_COLL].update_many(
+            {"activation_template_id": src["activation_template_id"],
+             "display_order": {"$gt": src.get("display_order", 0)}},
+            {"$inc": {"display_order": 1}},
+        )
+        await db[TPL_ITEM_COLL].insert_one(new_item)
+        new_item.pop("_id", None)
+        return new_item
+
+    @router.post("/activation/templates/{tpl_id}/items/reorder")
+    async def reorder_items(tpl_id: str, payload: Dict[str, Any], current=Depends(get_current_user)):
+        _require(current["role"], ROLE_MANAGE_TEMPLATES)
+        order = payload.get("order") or []
+        if not isinstance(order, list) or not order:
+            raise HTTPException(status_code=400, detail="order must be a non-empty list of item ids")
+        # Load existing items in this template to validate
+        rows = await db[TPL_ITEM_COLL].find(
+            {"activation_template_id": tpl_id}, {"_id": 0, "activation_template_item_id": 1},
+        ).to_list(1000)
+        valid_ids = {r["activation_template_item_id"] for r in rows}
+        for i, iid in enumerate(order):
+            if iid not in valid_ids:
+                raise HTTPException(status_code=400, detail=f"Unknown item id in order: {iid}")
+            await db[TPL_ITEM_COLL].update_one(
+                {"activation_template_item_id": iid},
+                {"$set": {"display_order": i, "updated_at": _iso(), "updated_by": current["email"]}},
+            )
+        return {"status": "ok", "count": len(order)}
+
+    @router.get("/activation/templates/{tpl_id}/usage")
+    async def template_usage(tpl_id: str, current=Depends(get_current_user)):
+        """Report how many Driver activation records reference this template."""
+        used_by = await db[REC_COLL].count_documents({"activation_template_id": tpl_id})
+        # Locked = at least one non-archived driver activation uses this template.
+        locked = await db[REC_COLL].count_documents(
+            {"activation_template_id": tpl_id, "is_archived": {"$ne": True}}
+        ) > 0
+        latest_version = await db[TPL_COLL].find_one(
+            {"activation_template_id": tpl_id}, {"_id": 0, "version": 1},
+        )
+        return {"activation_template_id": tpl_id,
+                "used_by_activation_records": used_by,
+                "locked": locked,
+                "version": (latest_version or {}).get("version", 1)}
 
     # ---- Driver activation -------------------------------------------------
     @router.get("/drivers/{driver_id}/activation")

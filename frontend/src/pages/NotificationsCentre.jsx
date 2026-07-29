@@ -258,8 +258,8 @@ function ListView({ slug, onOpen }) {
                 <tr><td colSpan={7} className="px-6 py-14 text-center text-sm text-slate-500" data-testid="notification-list-empty">No notifications match this view.</td></tr>
               )}
               {!loading && filtered.map((n) => (
-                <tr key={n.notification_id}
-                  data-testid={`notif-row-${n.notification_id}`}
+                <tr key={n.notification_id || n.id}
+                  data-testid={`notif-row-${n.notification_id || n.id}`}
                   className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors ${n.is_read ? "" : "bg-cyan-50/20"}`}>
                   <td className="px-6 py-3.5">
                     <span className={`inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.15em] px-2 py-0.5 rounded-full border ${SEVERITY_STYLES[n.severity] || SEVERITY_STYLES.Medium}`}>
@@ -574,7 +574,7 @@ function HistoryBlock({ label, rows, render, testid }) {
       ) : (
         <div className="space-y-2">
           {list.map((r, i) => (
-            <div key={i} className="border border-slate-100 rounded-lg px-3 py-2">{render(r)}</div>
+            <div key={r.job_id || r.id || r.notification_id || r.dead_letter_id || `row-${i}`} className="border border-slate-100 rounded-lg px-3 py-2">{render(r)}</div>
           ))}
         </div>
       )}

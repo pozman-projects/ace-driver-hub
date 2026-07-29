@@ -102,7 +102,9 @@ export default function ActivationTemplatesPage() {
               <tbody>
                 {rows.map((t) => (
                   <tr key={t.activation_template_id} data-testid={`template-row-${t.activation_template_id}`} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-medium text-slate-800">{t.name}</td>
+                    <td className="px-3 py-2 font-medium text-slate-800">
+                      <Link to={`/administration/activation-templates/${t.activation_template_id}`} data-testid={`template-open-${t.activation_template_id}`} className="hover:text-cyan-700 hover:underline">{t.name}</Link>
+                    </td>
                     <td className="px-3 py-2 text-slate-600">{t.driver_type}</td>
                     <td className="px-3 py-2 text-slate-600">{t.company_ref}</td>
                     <td className="px-3 py-2 text-right font-mono">v{t.version}</td>

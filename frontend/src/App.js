@@ -20,6 +20,7 @@ import NotificationsCentre from "./pages/NotificationsCentre";
 import NumberingAdmin from "./pages/NumberingAdmin";
 import DriverActivationPage from "./pages/DriverActivationPage";
 import ActivationTemplatesPage from "./pages/ActivationTemplatesPage";
+import ActivationTemplateDetailPage from "./pages/ActivationTemplateDetailPage";
 import ActivationJobsPage from "./pages/ActivationJobsPage";
 
 function App() {
@@ -142,6 +143,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ActivationTemplatesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/activation-templates/:templateId"
+              element={
+                <ProtectedRoute>
+                  <ActivationTemplateDetailPage />
                 </ProtectedRoute>
               }
             />

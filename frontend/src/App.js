@@ -18,6 +18,9 @@ import ImportCentre from "./pages/ImportCentre";
 import ImportWizard from "./pages/ImportWizard";
 import NotificationsCentre from "./pages/NotificationsCentre";
 import NumberingAdmin from "./pages/NumberingAdmin";
+import DriverActivationPage from "./pages/DriverActivationPage";
+import ActivationTemplatesPage from "./pages/ActivationTemplatesPage";
+import ActivationJobsPage from "./pages/ActivationJobsPage";
 
 function App() {
   return (
@@ -123,6 +126,30 @@ function App() {
               element={
                 <ProtectedRoute>
                   <NumberingAdmin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/drivers/:driverId/activation"
+              element={
+                <ProtectedRoute>
+                  <DriverActivationPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/activation-templates"
+              element={
+                <ProtectedRoute>
+                  <ActivationTemplatesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/activation-jobs"
+              element={
+                <ProtectedRoute>
+                  <ActivationJobsPage />
                 </ProtectedRoute>
               }
             />

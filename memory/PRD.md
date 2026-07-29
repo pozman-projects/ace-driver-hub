@@ -293,3 +293,24 @@ Modules:
 - Malware scan and object storage remain mocked / local.
 - No real ACE data imported.
 - Pre-existing React key warning on `/notifications/all` ListView — non-EB-10 scope.
+
+
+### Phase 2 · EB-10.1 Activation Hardening & Template Management Completion (2026-07-29)
+- **Frontend** — new `/administration/activation-templates/:activation_template_id` page (`ActivationTemplateDetailPage.jsx`): inline Item Editor (create/edit/delete/reorder/duplicate/archive/restore), locked-template banner, clone-as-new-version, ReadOnly/Allocator role gates.
+- **Backend** — item CRUD routes `/api/activation/template-items/*` and `/api/activation/templates/{id}/items/reorder`, `duplicate`, `restore`, `usage`. Locked-template guard: any change to `item_key` on a template with ≥1 driver activation returns 400 with "locked". Non-structural label edits allowed on locked templates.
+- **Historical snapshot immutability** — `label_snapshot` on `driver_activation_items` is captured at instantiation and never rewritten by later template edits (regression covered by `test_historical_activation_unaffected_by_edits`).
+- **Notifications fix** — `/notifications/all` ListView now keys by `notification_id` (fallback `id`); zero React "unique key" warnings.
+- **Test-suite hardening** — `test_activation_eb10.py::TestManualCompletion` now proactively revokes active overrides on Manual items to guarantee a workable item across re-runs, eliminating stateful test flakes.
+- **Tests**: 15 new pytest cases in `backend/tests/test_activation_eb10_1.py` (item unique key, conditional requires rule, override>0, critical-defect blocks override, ReadOnly + Allocator denied, duplicate, archive+restore, reorder + unknown-id rejection, template usage/locked, locked item_key rename rejected, locked non-structural edit permitted, clone-as-new-version max+1, historical snapshot immutability).
+- **Backend suite total**: **332 passed, 4 skipped, 0 failed** (336 tests, 288s).
+- **Frontend `testing_agent_v3_fork` iteration_13**: 14/14 EB-10.1 acceptance criteria PASS. Locked-template protection, clone-as-new-version to v13, ReadOnly gate, item CRUD, reorder, duplicate (`.copy` + `(Copy)` markers), archive/restore, and `/notifications/all` React key fix (278 rows, zero warnings) all verified against the external REACT_APP_BACKEND_URL.
+- **No** production deploy, **no** GitHub push, `main` untouched.
+
+**Files added (1):** `frontend/src/pages/ActivationTemplateDetailPage.jsx`, `backend/tests/test_activation_eb10_1.py`.
+
+**Files changed (2):** `backend/activation_module.py` (item CRUD + reorder/duplicate/restore/usage endpoints), `frontend/src/pages/NotificationsCentre.jsx` (key by `notification_id`), `backend/tests/test_activation_eb10.py` (state-leak hardening in `_prepare_manual_item`).
+
+**Known limitations (unchanged since EB-10):**
+- Notification email/SMS delivery still simulated (dev outbox).
+- Malware scan and object storage mocked / local.
+- No real ACE data imported.

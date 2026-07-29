@@ -186,12 +186,44 @@ class TestReadiness:
 class TestManualCompletion:
     def _manual_item(self, data):
         for it in data["items"]:
-            if it["completion_type"] == "Manual" and it["applicable"] and it["completion_status"] != "Complete":
+            if it["completion_type"] == "Manual" and it["applicable"] \
+               and it["completion_status"] not in ("Complete", "Override Active"):
                 return it
         return None
 
+    def _prepare_manual_item(self, admin_headers, driver_id, data=None):
+        """Return a Manual item in a reopenable state; revoke any blocking
+        override on a Manual item if the pool is exhausted by prior tests.
+        Always refetches state to avoid stale session fixtures."""
+        data = requests.get(f"{API}/drivers/{driver_id}/activation",
+                             headers=admin_headers, timeout=15).json()
+        it = self._manual_item(data)
+        if it:
+            return it, data
+        # No workable Manual item; try to revoke an override attached to a Manual item.
+        overrides = requests.get(f"{API}/drivers/{driver_id}/activation/overrides",
+                                  headers=admin_headers, timeout=15).json()
+        manual_item_ids = {i["driver_activation_item_id"]: i for i in data["items"]
+                            if i["completion_type"] == "Manual" and i["applicable"]}
+        for ovr in overrides:
+            if ovr.get("status") in ("Active", "Approved") \
+               and ovr.get("driver_activation_item_id") in manual_item_ids:
+                requests.post(f"{API}/activation-overrides/{ovr['activation_override_id']}/revoke",
+                               headers=admin_headers, timeout=15)
+                # Also reopen so it moves to Incomplete
+                requests.put(
+                    f"{API}/driver-activation-items/{ovr['driver_activation_item_id']}/manual-reopen",
+                    headers=admin_headers, timeout=15,
+                )
+                refreshed = requests.get(f"{API}/drivers/{driver_id}/activation",
+                                          headers=admin_headers, timeout=15).json()
+                m = self._manual_item(refreshed)
+                if m:
+                    return m, refreshed
+        return None, data
+
     def test_manual_complete_and_reopen(self, admin_headers, driver_id, activation_started):
-        m = self._manual_item(activation_started)
+        m, activation_started = self._prepare_manual_item(admin_headers, driver_id, activation_started)
         assert m, "expected a manual item"
         r = requests.put(
             f"{API}/driver-activation-items/{m['driver_activation_item_id']}/manual-complete",
@@ -213,7 +245,7 @@ class TestManualCompletion:
         assert refreshed2["completion_status"] in ("Incomplete", "Missing")
 
     def test_manual_readonly_denied(self, readonly_headers, driver_id, admin_headers, activation_started):
-        m = self._manual_item(activation_started)
+        m, _ = self._prepare_manual_item(admin_headers, driver_id, activation_started)
         assert m
         r = requests.put(
             f"{API}/driver-activation-items/{m['driver_activation_item_id']}/manual-complete",

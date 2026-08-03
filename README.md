@@ -1,29 +1,97 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-06) — staging branch · `dcc-phase2-eb06`
+> **Status:** Phase 2 Foundation Build (EB-11) — staging branch · `dcc-phase2-eb11`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
-> **Previous builds:** EB-01 · `dcc-phase2-eb01` · EB-02 · `dcc-phase2-eb02` · EB-03 · `dcc-phase2-eb03` · EB-04 · `dcc-phase2-eb04` · EB-05 · `dcc-phase2-eb05`
+> **Previous builds:** EB-01 through EB-10.1 complete · EB-11 = **Driver Start Sheet & Profile PDF exports** (this build)
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
 surface. Phase 2 builds the canonical foundation registers underneath the
 prototype modules established in Phase 1.
 
+## EB-11 · Driver Start Sheet & Profile PDF (this build)
+
+- Two immutable, permission-filtered PDF exports resolved from canonical DCC
+  state at generation time:
+  - **Driver Start Sheet** — 2–3 page A4 operational handover, generatable by
+    Allocator, Compliance, Manager or Admin. Includes identity, business (role-
+    gated), operational setup, compliance summary, activation readiness,
+    documents summary, and a printable sign-off block.
+  - **Driver Profile PDF** — 4–8 page A4 management review, generatable by
+    Compliance, Manager or Admin. Includes summary card, driver details,
+    account details (role-gated), setup, communication, carrier/equipment,
+    owner, activation checklist summary, compliance intelligence, documents,
+    role-filtered notes, and history summary.
+- Three new MongoDB collections:
+  - `driver_export_jobs` — request/generation lifecycle (Queued → Generating →
+    Completed / Failed / Archived).
+  - `driver_export_versions` — immutable versions with `snapshot_payload`
+    (already permission-filtered before storage), sha256, page count, file
+    size, and human-friendly verification reference (`ACE-XXXX-XXXX-XXXX`).
+  - `driver_export_events` — append-only audit trail (Requested, Generation
+    Started/Completed/Failed, Downloaded, Previewed, Archived, Version
+    Superseded, Verification Viewed).
+- **Storage:** every generated PDF is stored via the existing EB-05 document
+  abstraction — a matching `documents` + `document_versions` + `document_links`
+  record is created, keyed under a new document type `Driver Profile Export`.
+  Raw storage paths never leave the API.
+- **Rendering:** ReportLab (v5.0) Platypus, Helvetica-family fonts only, A4
+  portrait, greyscale-friendly. Every generated PDF is automatically
+  validated for `%PDF` header, positive page count, non-zero size, extractable
+  title text, and stable SHA-256.
+- **Verification:** authenticated route `GET /api/driver-exports/verify/{ref}`
+  and the frontend page `/exports/verify/:reference`. No public QR; the
+  verification page verifies checksum, shows role-filtered metadata, and only
+  opens the PDF when the current user is authorised.
+- **Access rules (dual gate):** the stored snapshot carries the role of the
+  generator, and the current requester is also role-checked at download time —
+  a currently-unauthorised user cannot open an old export just because someone
+  more senior generated it earlier.
+- **Regeneration** creates a fresh version (immutable), records a `Version
+  Superseded` event on the previous one, and updates the job's
+  `current_version_id` pointer. Prior versions remain accessible to authorised
+  roles.
+- **Frontend:** the Administration & Utilities card on the DCC exposes
+  Generate Start Sheet, Generate Profile PDF, and Open Export History with
+  loading/success/failure states and double-click prevention. New pages at
+  `/drivers/:driverId/exports` (history) and `/exports/verify/:reference`
+  (verification).
+- **Tests:** 28 new pytest cases in `backend/tests/test_driver_exports_eb11.py`
+  covering generation happy paths, snapshot security (Allocator/Compliance
+  strip financial fields; ReadOnly denied; historical Manager exports still
+  403 for Compliance), versioning + archive + immutability, no storage path
+  in API response, preview/download audit, verification (valid/invalid/role
+  filter/unauthenticated), and PDF signature/page/title/checksum validation.
+- **Backend suite total:** **363 passed, 1 skipped, 0 failed** (up from 336).
+- **Frontend `testing_agent_v3_fork` iteration_14 + iteration_15**: 15/15
+  EB-11 acceptance criteria PASS after two fixes (warning-banner data source
+  aligned to the DCC aggregator; back button target aligned to the real DCC
+  route).
+
 ## Phase 2 status
 
-| Milestone                            | State       |
-| ------------------------------------ | ----------- |
-| Business Blueprint                   | ✅ Complete |
-| Technical Architecture               | ✅ Complete |
-| Phase 2 Foundation Build             | 🟡 In progress |
-| **EB-01** — App shell / branding / visual frame | ✅ Complete |
-| **EB-02** — Foundation Registers | ✅ Complete |
-| **EB-03** — Assignment & Relationship Layer | ✅ Complete |
-| **EB-04** — Canonical Compliance Foundation | ✅ Complete |
-| **EB-05** — Document Storage & Evidence Architecture | ✅ Complete |
-| **EB-06** — Guided Spreadsheet Import & Migration Framework | ✅ **This build** |
-| Real ACE spreadsheet import          | ⏳ Not performed |
-| Notifications / alerts               | ⏳ Not performed |
-| Production deployment                | ⏳ Not performed |
+| Milestone                                          | State       |
+| -------------------------------------------------- | ----------- |
+| Business Blueprint                                 | ✅ Complete |
+| Technical Architecture                             | ✅ Complete |
+| **EB-01** — App shell / branding / visual frame    | ✅ Complete |
+| **EB-02** — Foundation Registers                   | ✅ Complete |
+| **EB-03** — Assignment & Relationship Layer        | ✅ Complete |
+| **EB-04** — Canonical Compliance Foundation        | ✅ Complete |
+| **EB-05** — Document Storage & Evidence            | ✅ Complete |
+| **EB-06** — Guided Spreadsheet Import & Migration  | ✅ Complete |
+| **EB-07a** — Notifications, Alerts & Escalation    | ✅ Complete |
+| **EB-08** — Automated Driver / Dispatch Numbering  | ✅ Complete |
+| **EB-09** — Final Three-Row DCC Driver Profile     | ✅ Complete |
+| **EB-10** — Driver Activation & Onboarding Gate    | ✅ Complete |
+| **EB-10.1** — Activation Hardening & Templates     | ✅ Complete |
+| **EB-11** — Driver Start Sheet & Profile PDF       | ✅ **This build** |
+| Real ACE spreadsheet import                        | ⏳ Not performed |
+| Production object storage                          | ⏳ Not performed |
+| Real email / SMS / Blink delivery                  | ⏳ Not performed |
+| Production deployment                              | ⏳ Not performed |
+| GitHub `main` merge                                | ⏳ Not performed |
+
+
 
 ### EB-02 scope (this build)
 - Four canonical master registers with UUID string ids and audit fields

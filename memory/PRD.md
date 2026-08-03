@@ -314,3 +314,68 @@ Modules:
 - Notification email/SMS delivery still simulated (dev outbox).
 - Malware scan and object storage mocked / local.
 - No real ACE data imported.
+
+### Phase 2 · EB-11 Driver Start Sheet & Profile PDF (2026-08-03)
+- **New backend modules**
+  - `backend/driver_pdf_renderer.py` — layout-only ReportLab renderer for both
+    export types (Helvetica family, A4 portrait, greyscale-friendly).
+  - `backend/driver_export_module.py` — `ExportService` + FastAPI router.
+- **3 new MongoDB collections**: `driver_export_jobs`,
+  `driver_export_versions`, `driver_export_events`. All UUID-keyed, indexed by
+  driver_id, export_type, verification_reference (unique sparse).
+- **11 new API routes** at `/api/drivers/{id}/exports/*`,
+  `/api/driver-exports/*` and `/api/driver-export-versions/*`. Two verification
+  targets, three lifecycle actions (archive, regenerate), two file-access
+  actions (preview, download).
+- **Two export types**:
+  - *Driver Start Sheet* — 2–3 page A4 operational handover for Allocator+.
+  - *Driver Profile PDF* — 4–8 page A4 management review for Compliance+.
+- **Snapshot immutability**: `driver_export_versions.snapshot_payload` is
+  captured permission-filtered; regeneration creates a new version and marks
+  the prior one *Superseded* via an event. No mutation of prior versions.
+- **Storage integration**: every generated PDF flows through the EB-05
+  documents architecture (new `document_type = "Driver Profile Export"` alongside the existing `Driver Start Sheet`). Raw storage paths are never
+  returned by any API.
+- **Verification**: authenticated route `/exports/verify/:reference`; short
+  human-friendly `ACE-XXXX-XXXX-XXXX` code; no public QR (scoped out).
+- **Dual-gate access**: (a) generator role captured on the snapshot; (b)
+  current requester's role also checked on preview/download. A Manager-
+  generated Profile PDF containing account fields is 403 for Compliance /
+  Allocator / ReadOnly even after generation.
+- **Frontend**:
+  - `AdminUtilitiesCard.jsx` upgraded with Generate Start Sheet / Generate
+    Profile PDF / Open Export History buttons, per-driver recent-exports strip,
+    warning banner for outstanding items / active overrides, loading state,
+    double-click prevention.
+  - New page `DriverExportsPage.jsx` at `/drivers/:driverId/exports` — full
+    history table with Type, Version, Status, Requested, Pages·Size,
+    Verification, and Actions (Preview / Download / Regenerate / Archive).
+  - New page `ExportVerificationPage.jsx` at `/exports/verify/:reference` —
+    checksum result, role-filtered metadata, `btn-verify-open` gated on
+    `can_open` from the API.
+- **Tests**: 28 new pytest cases in
+  `backend/tests/test_driver_exports_eb11.py` covering happy path,
+  permissions, snapshot security, versioning, immutability, file access,
+  audit, verification, and PDF signature/page/title/checksum validation.
+- **Backend suite total**: **363 passed, 1 skipped, 0 failed** (up from 336).
+- **Frontend testing agent iteration_14 + iteration_15**: 15/15 EB-11
+  acceptance criteria PASS after two fixes (warning-banner data source
+  aligned to the DCC aggregator; back-button target aligned to the real
+  DCC route).
+- **No** production deploy, **no** GitHub push, `main` untouched.
+
+**Files added (5):** `backend/driver_pdf_renderer.py`, `backend/driver_export_module.py`, `backend/tests/test_driver_exports_eb11.py`, `frontend/src/pages/DriverExportsPage.jsx`, `frontend/src/pages/ExportVerificationPage.jsx`, `memory/EB-11-TECHNICAL-NOTE.md`.
+
+**Files changed (3):** `backend/server.py` (startup + router wiring),
+`backend/requirements.txt` (added `reportlab==5.0.0`, `pypdf==6.14.2`),
+`frontend/src/components/driver-cc/AdminUtilitiesCard.jsx` (generate + history
+buttons + warning banner), `frontend/src/App.js` (two new routes).
+
+**Known limitations (unchanged from EB-10 baseline, plus EB-11 specific):**
+- Local development storage still used (no S3/GCS integration yet).
+- No malware scan on any document (uploaded or generated).
+- No public QR verification (scoped out; authenticated `/exports/verify` route
+  serves the same purpose without leak surface).
+- Notification email/SMS delivery still simulated.
+- No real ACE data imported.
+

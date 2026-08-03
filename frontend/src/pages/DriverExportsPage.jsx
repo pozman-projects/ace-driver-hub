@@ -127,6 +127,7 @@ export default function DriverExportsPage() {
       const url = URL.createObjectURL(res.data);
       if (mode === "preview") {
         window.open(url, "_blank", "noopener,noreferrer");
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } else {
         const a = document.createElement("a");
         a.href = url;
@@ -152,7 +153,7 @@ export default function DriverExportsPage() {
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <button onClick={() => navigate(`/drivers/${driverId}/command-centre`)}
+            <button onClick={() => navigate(`/drivers/${driverId}`)}
                     data-testid="btn-back-to-dcc"
                     className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 mb-2">
               <ArrowLeft size={12} /> Back to Driver Command Centre

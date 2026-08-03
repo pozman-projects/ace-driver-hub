@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { CaretRight, FileArrowDown, FilePdf, ClockCounterClockwise, Warning, CheckCircle, ArrowClockwise } from "@phosphor-icons/react";
+import { CaretRight, FileArrowDown, FilePdf, ClockCounterClockwise, Warning } from "@phosphor-icons/react";
 import axios from "axios";
 import { toast } from "sonner";
 import { ManagementCard } from "./driverCCUtils";
@@ -69,6 +69,8 @@ export default function AdminUtilitiesCard({ driverId, role, data }) {
       const url = URL.createObjectURL(res.data);
       if (mode === "preview") {
         window.open(url, "_blank", "noopener,noreferrer");
+        // Revoke after a short delay so the new tab has time to consume the URL
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } else {
         const a = document.createElement("a");
         a.href = url;
@@ -89,10 +91,15 @@ export default function AdminUtilitiesCard({ driverId, role, data }) {
     { key: "notifications", label: "Driver alerts", to: `/notifications/all?entity_type=Driver&entity_id=${driverId}`, available: true, testid: "util-notifications" },
   ];
 
-  const readiness = data?.activation?.readiness_status;
-  const showOverrideWarn = data?.activation?.active_override_count > 0;
-  const showBlockersWarn = data?.activation?.blocking_items_count > 0
-    || readiness === "Activation Blocked";
+  const readiness = data?.activation?.readiness;
+  const activeOverrideCount = data?.activation?.override ? 1 : 0;
+  const mandatoryMissing = (data?.activation?.mandatory_missing_items || []).length;
+  const showOverrideWarn = activeOverrideCount > 0
+    || readiness === "Ready with Override";
+  const showBlockersWarn = mandatoryMissing > 0
+    || readiness === "Activation Blocked"
+    || readiness === "Blocked"
+    || readiness === "Not Ready";
 
   return (
     <ManagementCard
@@ -109,8 +116,8 @@ export default function AdminUtilitiesCard({ driverId, role, data }) {
                data-testid="export-warning">
             <Warning size={12} className="mt-[1px] shrink-0" />
             <span>
-              {showBlockersWarn && <span data-testid="warn-blockers"><b>Blocking items present.</b> </span>}
-              {showOverrideWarn && <span data-testid="warn-overrides"><b>{data.activation.active_override_count} active override(s).</b> </span>}
+              {showBlockersWarn && <span data-testid="warn-blockers"><b>{mandatoryMissing > 0 ? `${mandatoryMissing} mandatory item(s) outstanding.` : "Activation not ready."}</b> </span>}
+              {showOverrideWarn && <span data-testid="warn-overrides"><b>Active override present.</b> </span>}
               Exports will note these truthfully.
             </span>
           </div>

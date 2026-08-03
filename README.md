@@ -1,71 +1,49 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-11) — staging branch · `dcc-phase2-eb11`
+> **Status:** Phase 2 Foundation Build (EB-12) — staging branch · `dcc-phase2-eb12`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
-> **Previous builds:** EB-01 through EB-10.1 complete · EB-11 = **Driver Start Sheet & Profile PDF exports** (this build)
+> **Previous builds:** EB-01 through EB-11 complete · EB-12 = **Migration Preparation, Mapping & Dry-Run Control** (this build)
 
 The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
 surface. Phase 2 builds the canonical foundation registers underneath the
 prototype modules established in Phase 1.
 
-## EB-11 · Driver Start Sheet & Profile PDF (this build)
+## EB-12 · Migration Preparation, Mapping & Dry-Run Control (this build)
 
-- Two immutable, permission-filtered PDF exports resolved from canonical DCC
-  state at generation time:
-  - **Driver Start Sheet** — 2–3 page A4 operational handover, generatable by
-    Allocator, Compliance, Manager or Admin. Includes identity, business (role-
-    gated), operational setup, compliance summary, activation readiness,
-    documents summary, and a printable sign-off block.
-  - **Driver Profile PDF** — 4–8 page A4 management review, generatable by
-    Compliance, Manager or Admin. Includes summary card, driver details,
-    account details (role-gated), setup, communication, carrier/equipment,
-    owner, activation checklist summary, compliance intelligence, documents,
-    role-filtered notes, and history summary.
-- Three new MongoDB collections:
-  - `driver_export_jobs` — request/generation lifecycle (Queued → Generating →
-    Completed / Failed / Archived).
-  - `driver_export_versions` — immutable versions with `snapshot_payload`
-    (already permission-filtered before storage), sha256, page count, file
-    size, and human-friendly verification reference (`ACE-XXXX-XXXX-XXXX`).
-  - `driver_export_events` — append-only audit trail (Requested, Generation
-    Started/Completed/Failed, Downloaded, Previewed, Archived, Version
-    Superseded, Verification Viewed).
-- **Storage:** every generated PDF is stored via the existing EB-05 document
-  abstraction — a matching `documents` + `document_versions` + `document_links`
-  record is created, keyed under a new document type `Driver Profile Export`.
-  Raw storage paths never leave the API.
-- **Rendering:** ReportLab (v5.0) Platypus, Helvetica-family fonts only, A4
-  portrait, greyscale-friendly. Every generated PDF is automatically
-  validated for `%PDF` header, positive page count, non-zero size, extractable
-  title text, and stable SHA-256.
-- **Verification:** authenticated route `GET /api/driver-exports/verify/{ref}`
-  and the frontend page `/exports/verify/:reference`. No public QR; the
-  verification page verifies checksum, shows role-filtered metadata, and only
-  opens the PDF when the current user is authorised.
-- **Access rules (dual gate):** the stored snapshot carries the role of the
-  generator, and the current requester is also role-checked at download time —
-  a currently-unauthorised user cannot open an old export just because someone
-  more senior generated it earlier.
-- **Regeneration** creates a fresh version (immutable), records a `Version
-  Superseded` event on the previous one, and updates the job's
-  `current_version_id` pointer. Prior versions remain accessible to authorised
-  roles.
-- **Frontend:** the Administration & Utilities card on the DCC exposes
-  Generate Start Sheet, Generate Profile PDF, and Open Export History with
-  loading/success/failure states and double-click prevention. New pages at
-  `/drivers/:driverId/exports` (history) and `/exports/verify/:reference`
-  (verification).
-- **Tests:** 28 new pytest cases in `backend/tests/test_driver_exports_eb11.py`
-  covering generation happy paths, snapshot security (Allocator/Compliance
-  strip financial fields; ReadOnly denied; historical Manager exports still
-  403 for Compliance), versioning + archive + immutability, no storage path
-  in API response, preview/download audit, verification (valid/invalid/role
-  filter/unauthenticated), and PDF signature/page/title/checksum validation.
-- **Backend suite total:** **363 passed, 1 skipped, 0 failed** (up from 336).
-- **Frontend `testing_agent_v3_fork` iteration_14 + iteration_15**: 15/15
-  EB-11 acceptance criteria PASS after two fixes (warning-banner data source
-  aligned to the DCC aggregator; back button target aligned to the real DCC
-  route).
+A complete, non-destructive migration-control layer. Inspects, maps,
+validates, reconciles and previews sanitised workbook data before the actual
+EB-13 migration. **No canonical record is mutated anywhere in EB-12**, and
+**no commit endpoint exists**. Real ACE data is not imported.
+
+- **Source workbook inventory** — upload sanitised .xlsx / .csv, detect
+  sheets and columns, checksum, authority-level classification.
+- **Versioned mapping profiles** — one active Approved profile per
+  workbook×sheet×target tuple. Approved profiles are immutable; clone
+  creates the next version. Manager/Admin approval required.
+- **13 deterministic transform rules** pre-seeded (trim, email, phone,
+  date, ABN, VIN, registration, state abbr, driver code, etc.).
+- **Deterministic matching hierarchy** per Driver / Owner / Vehicle /
+  Equipment. Multiple matches → Blocking. Name-only never auto-updates.
+- **Duplicate detection** within source and against canonical registers.
+  Never auto-merged.
+- **Dry-run engine** — apply transforms, match, detect duplicates,
+  reconcile, write issues. Deterministic and repeatable.
+- **Identifier reconciliation** — peek-only projection of live number
+  sequences; reserved (0, 13) enforced; historical non-integer codes
+  flagged Warning-only.
+- **Compliance-impact preview** — reads compliance state; no mutation.
+- **Activation-impact preview** — projects activation status; no
+  checklist, no events, no notifications generated.
+- **Document manifest** — proposed document entries only. No files
+  uploaded.
+- **Go / No-Go engine** — NO-GO when blockers / critical issues /
+  un-approved profiles; CONDITIONAL GO for Warning-only; GO for clean.
+  NO-GO reports cannot be approved.
+- **Rollback preview** — deterministic, applied=false, safe to re-run.
+- **Source lineage** — every proposed value has full workbook / sheet /
+  row / column / original / transformed / rules / profile provenance.
+- **Frontend** — 5 new pages under `/migration-preparation/*` (Hub,
+  Workbooks, Mappings, Dry Runs, Dry-Run detail with 11 tabs).
 
 ## Phase 2 status
 
@@ -84,12 +62,23 @@ prototype modules established in Phase 1.
 | **EB-09** — Final Three-Row DCC Driver Profile     | ✅ Complete |
 | **EB-10** — Driver Activation & Onboarding Gate    | ✅ Complete |
 | **EB-10.1** — Activation Hardening & Templates     | ✅ Complete |
-| **EB-11** — Driver Start Sheet & Profile PDF       | ✅ **This build** |
-| Real ACE spreadsheet import                        | ⏳ Not performed |
+| **EB-11** — Driver Start Sheet & Profile PDF       | ✅ Complete |
+| **EB-12** — Migration Preparation & Dry-Run        | ✅ **This build** |
+| **EB-13** — Real ACE migration commit              | ⏳ Not started |
 | Production object storage                          | ⏳ Not performed |
 | Real email / SMS / Blink delivery                  | ⏳ Not performed |
 | Production deployment                              | ⏳ Not performed |
 | GitHub `main` merge                                | ⏳ Not performed |
+
+
+
+The **Driver Command Centre (DCC)** is ACE Car Freighters' operational control
+surface. Phase 2 builds the canonical foundation registers underneath the
+prototype modules established in Phase 1.
+
+## EB-11 · Driver Start Sheet & Profile PDF (previous build)
+
+- Two immutable, permission-filtered PDF exports resolved from canonical DCC state at generation time (Driver Start Sheet + Driver Profile PDF). See `memory/EB-11-TECHNICAL-NOTE.md` for full details.
 
 
 

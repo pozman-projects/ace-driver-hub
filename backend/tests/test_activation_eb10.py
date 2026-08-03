@@ -200,7 +200,7 @@ class TestManualCompletion:
         it = self._manual_item(data)
         if it:
             return it, data
-        # No workable Manual item; try to revoke an override attached to a Manual item.
+        # Try revoke any active override on a Manual item
         overrides = requests.get(f"{API}/drivers/{driver_id}/activation/overrides",
                                   headers=admin_headers, timeout=15).json()
         manual_item_ids = {i["driver_activation_item_id"]: i for i in data["items"]
@@ -210,11 +210,21 @@ class TestManualCompletion:
                and ovr.get("driver_activation_item_id") in manual_item_ids:
                 requests.post(f"{API}/activation-overrides/{ovr['activation_override_id']}/revoke",
                                headers=admin_headers, timeout=15)
-                # Also reopen so it moves to Incomplete
                 requests.put(
                     f"{API}/driver-activation-items/{ovr['driver_activation_item_id']}/manual-reopen",
                     headers=admin_headers, timeout=15,
                 )
+                refreshed = requests.get(f"{API}/drivers/{driver_id}/activation",
+                                          headers=admin_headers, timeout=15).json()
+                m = self._manual_item(refreshed)
+                if m:
+                    return m, refreshed
+        # Last resort: reopen a Complete Manual item directly (test-only setup helper)
+        for item_id, it in manual_item_ids.items():
+            if it["completion_status"] == "Complete":
+                requests.put(
+                    f"{API}/driver-activation-items/{item_id}/manual-reopen",
+                    headers=admin_headers, timeout=15)
                 refreshed = requests.get(f"{API}/drivers/{driver_id}/activation",
                                           headers=admin_headers, timeout=15).json()
                 m = self._manual_item(refreshed)

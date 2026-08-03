@@ -379,3 +379,82 @@ buttons + warning banner), `frontend/src/App.js` (two new routes).
 - Notification email/SMS delivery still simulated.
 - No real ACE data imported.
 
+
+### Phase 2 · EB-12 Migration Preparation, Mapping & Dry-Run Control (2026-08-03)
+- **New backend module**: `backend/migration_prep_module.py` — service +
+  FastAPI router. 12 new UUID-keyed MongoDB collections
+  (`migration_source_workbooks`, `..._sheets`, `..._mapping_profiles`,
+  `..._field_mappings`, `..._transform_rules`, `..._source_lineage`,
+  `..._dry_runs`, `..._dry_run_rows`, `..._dry_run_changes`,
+  `..._issues`, `..._reconciliation_results`, `..._go_no_go_reports`).
+- **35 new API routes** at `/api/migration-prep/*` covering workbook
+  inventory, mapping profiles, field mappings, transform rules, dry
+  runs, issues, reconciliation reports (identifier / relationship /
+  compliance / activation / document), rollback preview, and Go/No-Go.
+  **No commit endpoint exists.**
+- **13 deterministic transform rules** pre-seeded (`_source: "seed-eb12"`):
+  trim, upper/lower/title, phone, email, date, currency, percentage,
+  bool, integer, driver_code, registration, VIN, ABN, status_map,
+  blank_to_null, state_abbr, control_chars.
+- **Matching engine**: deterministic hierarchy per entity type; multiple
+  matches → Blocking; name-only never auto-updates; probable matches
+  → `Manual Review`. Full match evidence returned.
+- **Duplicate detection**: within-source + against canonical registers.
+  Never auto-merged; surfaces as `DUPLICATE_*` issues.
+- **Identifier reconciliation**: peek-only projection of live sequences,
+  reserved-hit detection (0, 13), non-integer historical Codes flagged
+  as Warning-only, projected next sequence value returned.
+- **Compliance + Activation impact**: computed from proposed rows;
+  canonical compliance and activation records are never mutated.
+- **Document manifest**: manifest-only; no files uploaded in EB-12.
+- **Go / No-Go logic**: NO-GO when Open blockers > 0 OR Critical issues > 0
+  OR profiles not all Approved; CONDITIONAL GO for Warning-only; GO for
+  clean. NO-GO reports cannot be approved (backend 400).
+- **Rollback preview**: deterministic, applied=false; safe to re-run.
+- **Source lineage**: every proposed value keeps workbook id + checksum +
+  file name + sheet id + sheet name + row/column + original + transformed
+  + applied transforms + mapping profile id + version + target field.
+- **Frontend**: 5 new pages under `/migration-preparation/*` — Hub,
+  Workbooks Inventory (sanitised upload only), Mapping Profiles, Dry
+  Runs, and a Dry-Run detail page with 11 tabs (Summary, Rows, Changes,
+  Issues, Identifiers, Relationships, Compliance, Activation, Documents,
+  Rollback, Go/No-Go). Discoverable via the Hub-page tile.
+- **Tests**: 32 new pytest cases in `backend/tests/test_migration_prep_eb12.py`
+  using only sanitised fictional fixtures (no real ACE data).
+- **Backend suite total**: expected **395 passed** total (up from 363;
+  +32 new tests). Full run to be confirmed in the finish step.
+- **Frontend testing agent iteration_16**: all EB-12 acceptance criteria
+  PASS. Hub + 4 subpages + dry-run detail with 11 tabs all wired.
+  Go/No-Go compute works. `no-commit-notice` displayed. Regression on
+  EB-01…EB-11 pages clean.
+- **No** production deploy, **no** GitHub push, `main` untouched.
+
+**Files added (7):**
+- `backend/migration_prep_module.py`
+- `backend/tests/test_migration_prep_eb12.py`
+- `frontend/src/pages/MigrationPreparationHub.jsx`
+- `frontend/src/pages/MigrationWorkbooksPage.jsx`
+- `frontend/src/pages/MigrationMappingsPage.jsx`
+- `frontend/src/pages/MigrationDryRunsPage.jsx`
+- `frontend/src/pages/MigrationDryRunDetailPage.jsx`
+- `memory/EB-12-MIGRATION-PREPARATION-TECHNICAL-NOTE.md`
+
+**Files changed (4):**
+- `backend/server.py` — startup + router wiring for EB-12
+- `backend/requirements.txt` — added `openpyxl==3.1.5`
+- `frontend/src/App.js` — 5 new routes
+- `frontend/src/pages/Hub.jsx` — new Migration Preparation tile
+- `backend/tests/test_activation_eb10.py` — hardened `_prepare_manual_item`
+  helper (last-resort reopen of a Complete manual item to eliminate
+  the intermittent flake under concurrent test runs)
+
+**Known limitations (unchanged from EB-11 baseline, plus EB-12 specific):**
+- Raw workbook bytes stored inside the workbook document — acceptable for
+  sanitised dev fixtures only. Production must move to object storage.
+- Sheet classification (mapping a sheet to its target entity type) is
+  manual. Automated inference deferred.
+- Cross-sheet foreign-key resolution (Driver↔Owner via ABN across sheets)
+  scoped to EB-13.
+- No fuzzy matching — deterministic exact-key only. This is intentional.
+- No commit endpoint. Real migration is EB-13.
+

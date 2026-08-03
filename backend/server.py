@@ -531,6 +531,10 @@ async def on_startup():
     from activation_module import ensure_indexes as act_ensure_indexes, seed_default_template
     await act_ensure_indexes(db)
     await seed_default_template(db)
+    # --- EB-11 Driver Exports (Start Sheet + Profile PDF) ---
+    from driver_export_module import ensure_indexes as exp_ensure_indexes, seed_dev_examples as exp_seed
+    await exp_ensure_indexes(db)
+    await exp_seed(db)
 
 
 # Include router and CORS
@@ -571,6 +575,10 @@ app.include_router(build_driver_profile_router(db, get_current_user))
 # --- EB-10 Activation & Onboarding Gate ---
 from activation_module import build_activation_router  # noqa: E402
 app.include_router(build_activation_router(db, get_current_user))
+
+# --- EB-11 Driver Exports ---
+from driver_export_module import build_driver_export_router  # noqa: E402
+app.include_router(build_driver_export_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

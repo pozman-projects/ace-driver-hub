@@ -22,6 +22,8 @@ import DriverActivationPage from "./pages/DriverActivationPage";
 import ActivationTemplatesPage from "./pages/ActivationTemplatesPage";
 import ActivationTemplateDetailPage from "./pages/ActivationTemplateDetailPage";
 import ActivationJobsPage from "./pages/ActivationJobsPage";
+import DriverExportsPage from "./pages/DriverExportsPage";
+import ExportVerificationPage from "./pages/ExportVerificationPage";
 
 function App() {
   return (
@@ -159,6 +161,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ActivationJobsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/drivers/:driverId/exports"
+              element={
+                <ProtectedRoute>
+                  <DriverExportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/exports/verify/:reference"
+              element={
+                <ProtectedRoute>
+                  <ExportVerificationPage />
                 </ProtectedRoute>
               }
             />

@@ -535,6 +535,10 @@ async def on_startup():
     from driver_export_module import ensure_indexes as exp_ensure_indexes, seed_dev_examples as exp_seed
     await exp_ensure_indexes(db)
     await exp_seed(db)
+    # --- EB-12 Migration Preparation ---
+    from migration_prep_module import ensure_indexes as mp_ensure_indexes, seed_transform_rules as mp_seed_rules
+    await mp_ensure_indexes(db)
+    await mp_seed_rules(db)
 
 
 # Include router and CORS
@@ -579,6 +583,10 @@ app.include_router(build_activation_router(db, get_current_user))
 # --- EB-11 Driver Exports ---
 from driver_export_module import build_driver_export_router  # noqa: E402
 app.include_router(build_driver_export_router(db, get_current_user))
+
+# --- EB-12 Migration Preparation ---
+from migration_prep_module import build_migration_prep_router  # noqa: E402
+app.include_router(build_migration_prep_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

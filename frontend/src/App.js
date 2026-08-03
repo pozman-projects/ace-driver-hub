@@ -24,6 +24,11 @@ import ActivationTemplateDetailPage from "./pages/ActivationTemplateDetailPage";
 import ActivationJobsPage from "./pages/ActivationJobsPage";
 import DriverExportsPage from "./pages/DriverExportsPage";
 import ExportVerificationPage from "./pages/ExportVerificationPage";
+import MigrationPreparationHub from "./pages/MigrationPreparationHub";
+import MigrationWorkbooksPage from "./pages/MigrationWorkbooksPage";
+import MigrationMappingsPage from "./pages/MigrationMappingsPage";
+import MigrationDryRunsPage from "./pages/MigrationDryRunsPage";
+import MigrationDryRunDetailPage from "./pages/MigrationDryRunDetailPage";
 
 function App() {
   return (
@@ -180,6 +185,11 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/migration-preparation" element={<ProtectedRoute><MigrationPreparationHub /></ProtectedRoute>} />
+            <Route path="/migration-preparation/workbooks" element={<ProtectedRoute><MigrationWorkbooksPage /></ProtectedRoute>} />
+            <Route path="/migration-preparation/mappings" element={<ProtectedRoute><MigrationMappingsPage /></ProtectedRoute>} />
+            <Route path="/migration-preparation/dry-runs" element={<ProtectedRoute><MigrationDryRunsPage /></ProtectedRoute>} />
+            <Route path="/migration-preparation/dry-runs/:dryRunId" element={<ProtectedRoute><MigrationDryRunDetailPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster position="top-right" richColors closeButton />

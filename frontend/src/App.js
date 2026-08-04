@@ -29,6 +29,7 @@ import MigrationWorkbooksPage from "./pages/MigrationWorkbooksPage";
 import MigrationMappingsPage from "./pages/MigrationMappingsPage";
 import MigrationDryRunsPage from "./pages/MigrationDryRunsPage";
 import StorageAdmin from "./pages/StorageAdmin";
+import MigrationCommitHub from "./pages/MigrationCommitHub";
 import MigrationDryRunDetailPage from "./pages/MigrationDryRunDetailPage";
 
 function App() {
@@ -143,6 +144,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <StorageAdmin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/migration-commit"
+              element={
+                <ProtectedRoute>
+                  <MigrationCommitHub />
                 </ProtectedRoute>
               }
             />

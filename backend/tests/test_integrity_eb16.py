@@ -468,6 +468,59 @@ class TestRehearsalGate:
                 finally: db.client.close()
             asyncio.run(_rm())
 
+    def test_warning_only_yields_pass_with_warnings(self, admin_headers):
+        """Seed a rehearsal-tagged duplicate Owner ABN (Warning severity).
+        Assert: result == PASS_WITH_WARNINGS, Critical=0, Error=0, Warning>0,
+        and unrelated non-rehearsal rows do not affect the result."""
+        # Clean rehearsal baseline
+        requests.post(f"{API}/rehearsal/eb16/seed",
+                        headers=admin_headers, timeout=30)
+        # Inject two rehearsal-tagged Owners sharing an ABN (Warning-level)
+        # and one non-rehearsal Owner sharing the same ABN (must be ignored)
+        async def _inject():
+            db = _mongo()
+            try:
+                for oid in ("eb16-owner-warn-A", "eb16-owner-warn-B",
+                              "nonreh-owner-warn"):
+                    await db["owners"].delete_many({"id": oid})
+                await db["owners"].insert_many([
+                    {"id": "eb16-owner-warn-A", "name": "Ficta Warn A",
+                      "abn": "99999999999", "is_archived": False,
+                      "_source": "seed-eb16", "created_at": _now_iso()},
+                    {"id": "eb16-owner-warn-B", "name": "Ficta Warn B",
+                      "abn": "99999999999", "is_archived": False,
+                      "_source": "seed-eb16", "created_at": _now_iso()},
+                    {"id": "nonreh-owner-warn", "name": "Non-Rehearsal Owner",
+                      "abn": "99999999999", "is_archived": False,
+                      "_source": "seed-non-eb16", "created_at": _now_iso()},
+                ])
+            finally: db.client.close()
+        asyncio.run(_inject())
+        try:
+            r = requests.get(f"{API}/integrity/rehearsal-gate",
+                              headers=admin_headers).json()
+            counts = r["findings_by_severity"]
+            assert r["gate_result"] == "PASS_WITH_WARNINGS", r
+            assert counts["Critical"] == 0
+            assert counts["Error"] == 0
+            assert counts["Warning"] > 0
+            # Non-rehearsal row must NOT appear as a context source
+            non_reh_hits = [f for f in r["findings"]
+                              if f.get("rule_key") == "reg.duplicate_owner_abn"
+                              and f.get("context", {}).get("count", 0) > 2]
+            assert not non_reh_hits, (
+                "non-rehearsal ABN row leaked into rehearsal-scoped count")
+        finally:
+            async def _rm():
+                db = _mongo()
+                try:
+                    await db["owners"].delete_many(
+                        {"id": {"$in": ["eb16-owner-warn-A",
+                                          "eb16-owner-warn-B",
+                                          "nonreh-owner-warn"]}})
+                finally: db.client.close()
+            asyncio.run(_rm())
+
     def test_pre_existing_dev_rows_do_not_alter_result(self, admin_headers):
         """Assert that arbitrary NON-rehearsal-tagged rows in `drivers`
         cannot alter the rehearsal-scoped result."""

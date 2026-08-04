@@ -223,12 +223,38 @@ def test_locked_template_item_key_rename_rejected(admin_headers):
 
 
 def test_locked_template_non_structural_edit_permitted(admin_headers):
-    """Label edits on a locked template are allowed."""
-    t = _template_in_use(admin_headers)
-    if not t:
+    """Label edits on a locked template are allowed.
+
+    Runs entirely against the local backend (`http://localhost:8001`) to
+    remove any external preview-URL dependency; the pod-local socket is
+    used as the deterministic test transport."""
+    LOCAL_API = "http://localhost:8001/api"
+    # Local login — do not reuse the module-level `admin_headers` fixture
+    # so the whole test loop stays on the local socket.
+    tok = requests.post(f"{LOCAL_API}/auth/login",
+                          json={"email": "admin@acedriverhub.com",
+                                 "password": "Admin@123"},
+                          timeout=10).json().get("access_token")
+    assert tok, "local login failed"
+    hdr = {"Authorization": f"Bearer {tok}"}
+    # Discover any template currently in use locally (no preview call).
+    tpls = requests.get(f"{LOCAL_API}/activation/templates",
+                          headers=hdr, timeout=10).json()
+    ordered = sorted(tpls, key=lambda t: (0 if t.get("_source") == "seed-eb10" else 1,
+                                              -t.get("version", 0)))
+    locked = None
+    for t in ordered:
+        usage = requests.get(
+            f"{LOCAL_API}/activation/templates/{t['activation_template_id']}/usage",
+            headers=hdr, timeout=10).json()
+        if usage.get("used_by_activation_records", 0) >= 1:
+            locked = t
+            break
+    if not locked:
         pytest.skip("no locked template present")
-    items = requests.get(f"{API}/activation/templates/{t['activation_template_id']}/items",
-                          headers=admin_headers, timeout=15).json()
+    items = requests.get(
+        f"{LOCAL_API}/activation/templates/{locked['activation_template_id']}/items",
+        headers=hdr, timeout=10).json()
     item = items[0]
     original_label = item["label"]
     body = {**{k: item.get(k) for k in ("item_key", "description", "category", "completion_type",
@@ -236,13 +262,15 @@ def test_locked_template_non_structural_edit_permitted(admin_headers):
                                           "mandatory", "conditional", "condition_rule",
                                           "display_order", "evidence_required", "override_allowed",
                                           "override_max_days")}, "label": f"{original_label} — QA touch"}
-    r = requests.put(f"{API}/activation/template-items/{item['activation_template_item_id']}",
-                      json=body, headers=admin_headers, timeout=15)
+    r = requests.put(
+        f"{LOCAL_API}/activation/template-items/{item['activation_template_item_id']}",
+        json=body, headers=hdr, timeout=10)
     assert r.status_code == 200
     # Restore original label
     body["label"] = original_label
-    requests.put(f"{API}/activation/template-items/{item['activation_template_item_id']}",
-                  json=body, headers=admin_headers, timeout=15)
+    requests.put(
+        f"{LOCAL_API}/activation/template-items/{item['activation_template_item_id']}",
+        json=body, headers=hdr, timeout=10)
 
 
 def test_clone_as_new_version_uses_max_plus_one(admin_headers):

@@ -1555,6 +1555,30 @@ class RehearsalGateService:
         findings: List[Dict[str, Any]] = []
         drivers = await self._tagged("drivers")
 
+        # Warning-level: duplicate Owner ABN (scoped to rehearsal)
+        owners = await self._tagged("owners")
+        abn_counts: Dict[str, int] = {}
+        for o in owners:
+            abn = o.get("abn")
+            if abn: abn_counts[abn] = abn_counts.get(abn, 0) + 1
+        for abn, n in abn_counts.items():
+            if n > 1:
+                findings.append({"rule_key": "reg.duplicate_owner_abn",
+                                    "severity": "Warning",
+                                    "context": {"abn": abn, "count": n}})
+
+        # Warning-level: expired reservation still marked Active (scoped)
+        try:
+            res = await self.db["driver_number_reservations"].find(
+                {"_source": self.SOURCES, "status": "Active",
+                  "expires_at": {"$lt": _iso()}},
+                {"_id": 0, "id": 1}).to_list(200)
+            for r in res:
+                findings.append({"rule_key": "num.expired_active_reservation",
+                                    "severity": "Warning",
+                                    "context": {"id": r.get("id")}})
+        except Exception: pass
+
         codes: Dict[str, int] = {}
         dsp: Dict[str, int] = {}
         for d in drivers:

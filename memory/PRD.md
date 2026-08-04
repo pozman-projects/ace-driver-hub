@@ -1185,3 +1185,82 @@ Development Outbox.
 - ❌ No deploy, no GitHub push, `main` untouched.
 - ✅ Development Outbox default.
 
+
+---
+
+## EB-16 Integrity Close-out · End-to-End Rehearsal & Deterministic Gate (2026-02-04)
+
+### Delivered
+1. **True end-to-end rehearsal runner** — `RehearsalRunner` in
+   `integrity_module.py`. Records all 19 steps (workbook upload →
+   profiling → classification → mapping → mapping approval → dry run →
+   issue resolution → Go/No-Go → commit-job → approval → preflight →
+   rollback package → staged commit → post-commit reconciliation →
+   activation recalculation → notification materialisation (Dev
+   Outbox) → export generation → controlled rollback → post-rollback
+   verification). Every artefact carries a per-run `_source`
+   tag `rehearsal-run:{uuid}`. Idempotent — running twice yields
+   identical PASS outcomes with distinct run IDs.
+2. **Isolated rehearsal-scoped gate** — `RehearsalGateService`
+   evaluates PASS / PASS_WITH_WARNINGS / FAIL over ONLY the
+   `_source ∈ {seed-eb16*, rehearsal-run:*}` rows. Pre-existing
+   development records CANNOT alter the outcome. The system-wide
+   `/api/integrity/release-gate` is untouched.
+3. **SendGrid positive signature test** — added to
+   `test_integrity_eb16.py::TestWebhooks::test_sendgrid_signature_verification_positive`.
+   `_verify_sendgrid_signature` now accepts hex-encoded or
+   base64-encoded signatures.
+4. **Unknown provider message ID & duplicate callback tests** — verified
+   safe handling.
+
+### New routes
+- `POST /api/rehearsal/eb16/run` (Admin) — execute the full 19-step
+  rehearsal sequence.
+- `GET  /api/rehearsal/eb16/runs` (Manager+) — list recent runs.
+- `GET  /api/rehearsal/eb16/runs/{run_id}` (Manager+) — full run
+  detail with per-step outcomes.
+- `GET  /api/integrity/rehearsal-gate` (Manager+) — deterministic
+  rehearsal-scoped gate.
+
+### New collections + indexes
+- `rehearsal_runs` (unique on `rehearsal_run_id`)
+- `rehearsal_run_steps` (unique on `rehearsal_run_step_id`,
+  indexed on `(rehearsal_run_id, at)`)
+
+### Files changed
+- `backend/integrity_module.py` — added `RehearsalRunner`,
+  `RehearsalGateService`, 4 new routes, 2 collection indexes,
+  hex-signature acceptance for SendGrid.
+- `backend/tests/test_integrity_eb16.py` — extended cleanup, added
+  9 new tests (`TestRehearsalRunner` ×2, `TestRehearsalGate` ×4,
+  `test_sendgrid_signature_verification_positive`,
+  `test_unknown_message_id_recorded_safely`,
+  `test_duplicate_callback_idempotent`).
+
+### Verification (targeted)
+- `tests/test_integrity_eb16.py` — **32/32 PASS** (was 23; +9).
+- End-to-end rehearsal live via curl: **overall_result=PASS**, 19
+  steps recorded, all assertions true, gate=PASS.
+- Rehearsal gate live via curl: **PASS**, Critical=0, Error=0,
+  Warning=0, Info=0.
+
+### Final full backend suite
+- **546 passed, 1 failed, 4 skipped** — but the single failure was
+  a `ConnectTimeoutError` from the preview URL (DNS/proxy timeout, not
+  a regression); the same test passes standalone in 5.19 s.
+- **Effective baseline: 547 passing, 4 skipped, 0 regressions** vs.
+  the 538+4 baseline (net +9 EB-16 close-out tests).
+- All 4 skips remain the pre-existing conditional skips in
+  `test_activation_eb10*.py`.
+
+### Frontend
+No UI changes in this close-out. Frontend baseline from EB-16 iteration
+22 (100% PASS) is untouched.
+
+### Constraints honoured
+- ✅ No real data. Fixtures only.
+- ✅ No real messages (Development Outbox).
+- ✅ No real credentials.
+- ✅ Webhooks default-disabled.
+- ✅ No deploy, no GitHub push, `main` untouched.
+

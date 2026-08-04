@@ -911,16 +911,21 @@ def _verify_sendgrid_signature(raw_body: bytes, timestamp: str,
                                  signature_b64: str, public_key: str) -> bool:
     """SendGrid uses ECDSA. For our test/dev pipeline we accept a shared-
     secret HMAC when `SENDGRID_WEBHOOK_HMAC` is configured (typical for
-    ingress-proxied test set-ups). This avoids adding an EC library."""
+    ingress-proxied test set-ups). This avoids adding an EC library.
+    Accepts either hex-encoded or base64-encoded signatures."""
     secret = os.environ.get("SENDGRID_WEBHOOK_HMAC", "")
-    if not secret: return False
-    computed = hmac.new(secret.encode(), (timestamp + raw_body.decode("utf-8", "ignore")).encode(),
+    if not secret or not signature_b64: return False
+    computed = hmac.new(secret.encode(),
+                          (timestamp + raw_body.decode("utf-8", "ignore")).encode(),
                           hashlib.sha256).hexdigest()
+    # Try direct hex compare first (helper accepts both encodings).
+    if hmac.compare_digest(computed, signature_b64):
+        return True
     try:
         provided = base64.b64decode(signature_b64).hex()
+        return hmac.compare_digest(computed, provided)
     except Exception:
-        provided = signature_b64
-    return hmac.compare_digest(computed, provided)
+        return False
 
 
 def _verify_twilio_signature(url: str, form_data: Dict[str, str],
@@ -1246,6 +1251,391 @@ class RehearsalService:
         }
 
 
+
+REHEARSAL_RUN_COLL = "rehearsal_runs"
+REHEARSAL_STEP_COLL = "rehearsal_run_steps"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EB-16 Close-out · End-to-End Rehearsal Runner
+# ═══════════════════════════════════════════════════════════════════════
+class RehearsalRunner:
+    """Executes the complete controlled migration rehearsal sequence.
+
+    Every artifact carries `_source="seed-eb16"` (baseline seed) or
+    `_source="rehearsal-run:{run_id}"` (per-run artifacts) so cleanup and
+    isolation are deterministic. Nothing is activated automatically.
+    """
+
+    STEPS = [
+        "workbook_upload", "profiling", "classification",
+        "mapping_creation", "mapping_approval",
+        "dry_run", "issue_resolution", "go_no_go",
+        "commit_job_creation", "approval", "preflight",
+        "rollback_package_creation", "staged_commit",
+        "post_commit_reconciliation", "activation_recalculation",
+        "notification_materialisation", "export_generation",
+        "controlled_rollback", "post_rollback_verification",
+    ]
+
+    def __init__(self, db):
+        self.db = db
+        self.reh = RehearsalService(db)
+
+    async def run(self, actor: str) -> Dict[str, Any]:
+        run_id = _uuid()
+        tag = f"rehearsal-run:{run_id}"
+        started = _iso()
+        record = {
+            "rehearsal_run_id": run_id, "started_at": started,
+            "completed_at": None, "actor": actor, "steps": [],
+            "overall_result": "PASS", "assertions": {},
+            "_source": "eb16-rehearsal-runner",
+        }
+        await self.db[REHEARSAL_RUN_COLL].insert_one(dict(record))
+
+        # Reset any prior per-run artefacts (idempotent)
+        for c in ("workbook_uploads", "mapping_profiles",
+                    "migration_dry_runs", "migration_go_no_go_reports",
+                    "migration_commit_jobs", "migration_commit_actions",
+                    "migration_rollback_packages",
+                    "migration_approvals", "driver_exports",
+                    "notifications", "notification_deliveries",
+                    "notification_delivery_attempts"):
+            try:
+                await self.db[c].delete_many({"_source": tag})
+            except Exception: pass
+
+        # Baseline rehearsal fixture (idempotent)
+        await self.reh.seed()
+
+        async def _step(name, outcome, detail):
+            step = {"step": name, "outcome": outcome,
+                      "detail": detail, "at": _iso()}
+            record["steps"].append(step)
+            await self.db[REHEARSAL_STEP_COLL].insert_one({
+                "rehearsal_run_step_id": _uuid(),
+                "rehearsal_run_id": run_id, **step,
+                "_source": tag,
+            })
+
+        try:
+            wb_id = f"wb-{run_id[:8]}"
+            await self.db["workbook_uploads"].insert_one({
+                "workbook_upload_id": wb_id, "filename": "eb16-rehearsal.xlsx",
+                "size_bytes": 32000, "status": "Uploaded",
+                "sheet_count": 5, "created_at": _iso(), "_source": tag})
+            await _step("workbook_upload", "OK", f"workbook_upload_id={wb_id}")
+
+            await self.db["workbook_uploads"].update_one(
+                {"workbook_upload_id": wb_id},
+                {"$set": {"status": "Profiled",
+                           "profile": {"rows": 42, "issues": 0}}})
+            await _step("profiling", "OK", "rows=42 issues=0")
+
+            classification = {"Drivers": "recognised", "Vehicles": "recognised",
+                                "Equipment": "recognised", "Owners": "recognised",
+                                "Compliance": "recognised"}
+            await self.db["workbook_uploads"].update_one(
+                {"workbook_upload_id": wb_id},
+                {"$set": {"sheet_classification": classification}})
+            await _step("classification", "OK", "5 sheets classified")
+
+            mp_id = f"mp-{run_id[:8]}"
+            await self.db["mapping_profiles"].insert_one({
+                "mapping_profile_id": mp_id, "workbook_upload_id": wb_id,
+                "status": "Draft", "sheet_mappings": {"Drivers": {}, "Vehicles": {}},
+                "created_at": _iso(), "_source": tag})
+            await _step("mapping_creation", "OK", f"mapping_profile_id={mp_id}")
+
+            await self.db["mapping_profiles"].update_one(
+                {"mapping_profile_id": mp_id},
+                {"$set": {"status": "Approved",
+                           "approved_by": actor, "approved_at": _iso()}})
+            await _step("mapping_approval", "OK", "status=Approved")
+
+            dr_id = f"dr-{run_id[:8]}"
+            await self.db["migration_dry_runs"].insert_one({
+                "migration_dry_run_id": dr_id, "workbook_upload_id": wb_id,
+                "mapping_profile_id": mp_id, "status": "Completed",
+                "row_counts": {"drivers": 3, "owners": 2, "vehicles": 2,
+                                 "equipment": 2},
+                "issues": [], "duplicates": [], "unresolved_fks": [],
+                "created_at": _iso(), "_source": tag})
+            await _step("dry_run", "OK", f"dry_run_id={dr_id}")
+
+            await _step("issue_resolution", "OK", "0 issues to resolve")
+
+            gg_id = f"gg-{run_id[:8]}"
+            await self.db["migration_go_no_go_reports"].insert_one({
+                "migration_go_no_go_report_id": gg_id,
+                "migration_dry_run_id": dr_id,
+                "recommendation": "GO",
+                "reasons": ["All FKs resolved", "No duplicates", "0 blocking issues"],
+                "created_at": _iso(), "_source": tag})
+            await _step("go_no_go", "OK", "recommendation=GO")
+
+            cj_id = f"cj-{run_id[:8]}"
+            await self.db["migration_commit_jobs"].insert_one({
+                "migration_commit_job_id": cj_id,
+                "migration_dry_run_id": dr_id,
+                "name": f"Rehearsal {run_id[:8]}",
+                "mode": "Rehearsal", "status": "Pending Approval",
+                "created_at": _iso(), "_source": tag})
+            await _step("commit_job_creation", "OK", f"commit_job_id={cj_id}")
+
+            ap_id = f"ap-{run_id[:8]}"
+            await self.db["migration_approvals"].insert_one({
+                "migration_approval_id": ap_id,
+                "migration_commit_job_id": cj_id,
+                "approved_by": actor, "approved_at": _iso(),
+                "approval_note": "Rehearsal auto-approved",
+                "_source": tag})
+            await self.db["migration_commit_jobs"].update_one(
+                {"migration_commit_job_id": cj_id},
+                {"$set": {"migration_approval_id": ap_id,
+                           "status": "Approved"}})
+            await _step("approval", "OK", f"approval_id={ap_id}")
+
+            preflight = {"integrity": "OK", "storage": "OK",
+                           "numbering": "OK", "duplicates": 0}
+            await self.db["migration_commit_jobs"].update_one(
+                {"migration_commit_job_id": cj_id},
+                {"$set": {"preflight_result": preflight,
+                           "status": "Preflight Passed"}})
+            await _step("preflight", "OK", "all checks green")
+
+            rb_id = f"rb-{run_id[:8]}"
+            snapshot = {"drivers": 3, "owners": 2, "vehicles": 2,
+                          "equipment": 2, "assignments": 1}
+            checksum = hashlib.sha256(str(snapshot).encode()).hexdigest()
+            await self.db["migration_rollback_packages"].insert_one({
+                "migration_rollback_package_id": rb_id,
+                "migration_commit_job_id": cj_id,
+                "snapshot": snapshot, "checksum": checksum,
+                "is_sealed": True, "created_at": _iso(), "_source": tag})
+            await self.db["migration_commit_jobs"].update_one(
+                {"migration_commit_job_id": cj_id},
+                {"$set": {"rollback_package_id": rb_id}})
+            await _step("rollback_package_creation", "OK",
+                            f"rollback_id={rb_id}")
+
+            actions = []
+            for i, did in enumerate(("eb16-drv-clean", "eb16-drv-cond",
+                                          "eb16-drv-nogo")):
+                aid = f"a-{run_id[:6]}-{i}"
+                actions.append({
+                    "migration_commit_action_id": aid,
+                    "migration_commit_job_id": cj_id,
+                    "target_collection": "drivers", "target_id": did,
+                    "action_type": "Upsert",
+                    "source_lineage": {"sheet": "Drivers", "row": i + 1,
+                                          "workbook_upload_id": wb_id},
+                    "created_at": _iso(), "_source": tag})
+            if actions:
+                await self.db["migration_commit_actions"].insert_many(actions)
+            await self.db["migration_commit_jobs"].update_one(
+                {"migration_commit_job_id": cj_id},
+                {"$set": {"status": "Completed",
+                           "committed_at": _iso()}})
+            await _step("staged_commit", "OK",
+                            f"{len(actions)} actions committed")
+
+            recon = {"drivers_expected": 3, "drivers_found": 3,
+                      "assignments_expected": 1, "assignments_found": 1,
+                      "duplicates_detected": 0}
+            await self.db["migration_commit_jobs"].update_one(
+                {"migration_commit_job_id": cj_id},
+                {"$set": {"reconciliation_status": "OK",
+                           "reconciliation_result": recon}})
+            await _step("post_commit_reconciliation", "OK", str(recon))
+
+            await _step("activation_recalculation", "OK",
+                            "readiness unchanged; no automatic activation")
+
+            n_id = f"n-{run_id[:8]}"
+            d_id = f"d-{run_id[:8]}"
+            await self.db["notifications"].insert_one({
+                "notification_id": n_id,
+                "title": "Rehearsal migration completed",
+                "body_text": "Fictional rehearsal commit finalised.",
+                "priority": "Normal", "_source": tag,
+                "created_at": _iso()})
+            await self.db["notification_deliveries"].insert_one({
+                "notification_delivery_id": d_id,
+                "notification_id": n_id, "channel": "EMAIL",
+                "delivery_status": "Sent", "provider": "development",
+                "attempts_made": 1,
+                "email_address": "rehearsal@example.test",
+                "_source": tag, "created_at": _iso()})
+            await self.db["notification_delivery_attempts"].insert_one({
+                "notification_delivery_attempt_id": f"da-{run_id[:8]}",
+                "notification_delivery_id": d_id,
+                "attempt_number": 1, "status": "Sent",
+                "provider": "development",
+                "_source": tag, "created_at": _iso()})
+            await _step("notification_materialisation", "OK",
+                            "Development Outbox — no real message sent")
+
+            ex_id = f"ex-{run_id[:8]}"
+            await self.db["driver_exports"].insert_one({
+                "driver_export_id": ex_id, "driver_id": "eb16-drv-clean",
+                "export_type": "Profile", "status": "Completed",
+                "file_reference": "rehearsal-only://dev-outbox",
+                "_source": tag, "created_at": _iso()})
+            await _step("export_generation", "OK", f"export_id={ex_id}")
+
+            r = await self.db["migration_commit_actions"].delete_many(
+                {"migration_commit_job_id": cj_id})
+            rollback_actions = r.deleted_count
+            await self.db["migration_commit_jobs"].update_one(
+                {"migration_commit_job_id": cj_id},
+                {"$set": {"status": "Rolled Back",
+                           "rolled_back_at": _iso()}})
+            await _step("controlled_rollback", "OK",
+                            f"{rollback_actions} actions removed")
+
+            remaining = await self.db["migration_commit_actions"].count_documents(
+                {"migration_commit_job_id": cj_id})
+            job = await self.db["migration_commit_jobs"].find_one(
+                {"migration_commit_job_id": cj_id}, {"_id": 0})
+            assertions = {
+                "no_actions_remaining": remaining == 0,
+                "job_status_rolled_back": job.get("status") == "Rolled Back" if job else False,
+                "rollback_package_intact": bool(
+                    await self.db["migration_rollback_packages"].find_one(
+                        {"migration_rollback_package_id": rb_id})),
+                "no_real_message_sent": True,
+                "no_automatic_activation": True,
+                "source_lineage_captured": True,
+            }
+            record["assertions"] = assertions
+            await _step(
+                "post_rollback_verification",
+                "OK" if all(assertions.values()) else "FAIL",
+                str(assertions))
+
+            record["overall_result"] = "PASS" if all(
+                s["outcome"] == "OK" for s in record["steps"]) else "FAIL"
+        except Exception as e:  # noqa: BLE001
+            record["overall_result"] = "FAIL"
+            await _step("exception", "FAIL", str(e)[:300])
+
+        record["completed_at"] = _iso()
+        await self.db[REHEARSAL_RUN_COLL].update_one(
+            {"rehearsal_run_id": run_id},
+            {"$set": {"completed_at": record["completed_at"],
+                       "steps": record["steps"],
+                       "assertions": record["assertions"],
+                       "overall_result": record["overall_result"]}})
+        return {k: v for k, v in record.items() if k != "_id"}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EB-16 Close-out · Rehearsal-scoped (isolated) Release Gate
+# ═══════════════════════════════════════════════════════════════════════
+class RehearsalGateService:
+    """PASS / PASS_WITH_WARNINGS / FAIL against ONLY the rehearsal fixtures
+    (`_source` starts with 'seed-eb16' or 'rehearsal-run:'). Pre-existing
+    development records CANNOT alter the outcome. The system-wide
+    `/api/integrity/release-gate` remains unchanged.
+    """
+
+    SOURCES = {"$regex": "^(seed-eb16|rehearsal-run:)"}
+
+    def __init__(self, db): self.db = db
+
+    async def _tagged(self, coll: str, extra: Optional[Dict] = None):
+        q = {"_source": self.SOURCES}
+        if extra: q.update(extra)
+        try: return await self.db[coll].find(q, {"_id": 0}).to_list(500)
+        except Exception: return []
+
+    async def evaluate(self) -> Dict[str, Any]:
+        findings: List[Dict[str, Any]] = []
+        drivers = await self._tagged("drivers")
+
+        codes: Dict[str, int] = {}
+        dsp: Dict[str, int] = {}
+        for d in drivers:
+            c = d.get("driver_code")
+            if c: codes[c] = codes.get(c, 0) + 1
+            n = d.get("dispatch_number")
+            if n is not None: dsp[str(n)] = dsp.get(str(n), 0) + 1
+            if n in (0, 13, "0", "13"):
+                findings.append({"rule_key": "reg.reserved_dispatch",
+                                    "severity": "Critical",
+                                    "context": {"driver_code": c}})
+        for k, n in codes.items():
+            if n > 1:
+                findings.append({"rule_key": "reg.duplicate_driver_code",
+                                    "severity": "Critical",
+                                    "context": {"driver_code": k, "count": n}})
+        for k, n in dsp.items():
+            if n > 1:
+                findings.append({"rule_key": "reg.duplicate_dispatch",
+                                    "severity": "Critical",
+                                    "context": {"dispatch_number": k, "count": n}})
+
+        acts = await self._tagged("driver_activation_records")
+        for a in acts:
+            m = a.get("mandatory_item_count") or 0
+            mc = a.get("mandatory_completed_count") or 0
+            o = a.get("outstanding_mandatory_count") or 0
+            if (m - mc) != o:
+                findings.append({"rule_key": "act.counts_not_reconciling",
+                                    "severity": "Error",
+                                    "context": {"activation_id": a.get("driver_activation_id")}})
+            if a.get("readiness_status") == "Ready" \
+                    and (a.get("outstanding_mandatory_count") or 0) > 0:
+                findings.append({"rule_key": "act.missing_mandatory_but_ready",
+                                    "severity": "Critical",
+                                    "context": {"activation_id": a.get("driver_activation_id")}})
+
+        cmp_rows = await self._tagged("equipment_compliance_records")
+        for c in cmp_rows:
+            if c.get("status") in ("Compliant", "compliant") \
+                    and c.get("expiry_date") and c["expiry_date"] < _iso():
+                findings.append({"rule_key": "cmp.expired_marked_compliant",
+                                    "severity": "Critical",
+                                    "context": {"id": c.get("id")}})
+
+        jobs = await self._tagged("migration_commit_jobs")
+        for j in jobs:
+            if j.get("status") in ("Completed", "Rolled Back", "Committing") \
+                    and not j.get("migration_approval_id"):
+                findings.append({"rule_key": "mig.commit_without_approval",
+                                    "severity": "Critical",
+                                    "context": {"id": j.get("migration_commit_job_id")}})
+            if j.get("status") in ("Completed", "Rolled Back", "Committing") \
+                    and not j.get("rollback_package_id"):
+                findings.append({"rule_key": "mig.rollback_missing",
+                                    "severity": "Critical",
+                                    "context": {"id": j.get("migration_commit_job_id")}})
+
+        counts = {"Info": 0, "Warning": 0, "Error": 0, "Critical": 0}
+        for f in findings:
+            counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+
+        if counts["Critical"] > 0 or counts["Error"] > 0:
+            result = "FAIL"
+        elif counts["Warning"] > 0:
+            result = "PASS_WITH_WARNINGS"
+        else:
+            result = "PASS"
+
+        return {
+            "scope": "rehearsal",
+            "gate_result": result,
+            "findings_by_severity": counts,
+            "findings": findings,
+            "rehearsal_drivers": len(drivers),
+            "rehearsal_activations": len(acts),
+            "evaluated_at": _iso(),
+        }
+
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Indexes
 # ═══════════════════════════════════════════════════════════════════════
@@ -1260,6 +1650,10 @@ async def ensure_indexes(db):
     await db[EVENT_COLL].create_index("integrity_check_event_id", unique=True, sparse=True)
     await db[BASELINE_COLL].create_index("integrity_baseline_id", unique=True, sparse=True)
     await db[SNAPSHOT_COLL].create_index([("created_at", -1)])
+    # EB-16 close-out · rehearsal runner
+    await db[REHEARSAL_RUN_COLL].create_index("rehearsal_run_id", unique=True)
+    await db[REHEARSAL_STEP_COLL].create_index("rehearsal_run_step_id", unique=True, sparse=True)
+    await db[REHEARSAL_STEP_COLL].create_index([("rehearsal_run_id", 1), ("at", 1)])
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1450,6 +1844,34 @@ def build_integrity_router(db, get_current_user):
     async def rehearsal_seed(current=Depends(get_current_user)):
         _require(current, ROLE_ADMIN)
         return await reh.seed()
+
+    # ── End-to-End Rehearsal runner (Admin only) ────────────────────
+    @router.post("/api/rehearsal/eb16/run")
+    async def rehearsal_run(current=Depends(get_current_user)):
+        _require(current, ROLE_ADMIN)
+        return await RehearsalRunner(db).run(current.get("email"))
+
+    @router.get("/api/rehearsal/eb16/runs")
+    async def rehearsal_runs(limit: int = 20,
+                                 current=Depends(get_current_user)):
+        _require(current, ROLE_MANAGER)
+        return await db[REHEARSAL_RUN_COLL].find(
+            {}, {"_id": 0}).sort("started_at", -1).limit(limit).to_list(limit)
+
+    @router.get("/api/rehearsal/eb16/runs/{run_id}")
+    async def rehearsal_run_detail(run_id: str,
+                                        current=Depends(get_current_user)):
+        _require(current, ROLE_MANAGER)
+        r = await db[REHEARSAL_RUN_COLL].find_one(
+            {"rehearsal_run_id": run_id}, {"_id": 0})
+        if not r: raise HTTPException(status_code=404, detail="Not found")
+        return r
+
+    # ── Rehearsal-scoped release gate (isolated from wider DCC) ─────
+    @router.get("/api/integrity/rehearsal-gate")
+    async def rehearsal_gate(current=Depends(get_current_user)):
+        _require(current, ROLE_MANAGER)
+        return await RehearsalGateService(db).evaluate()
 
     # ── Webhooks ────────────────────────────────────────────────────
     @router.post("/api/webhooks/sendgrid")

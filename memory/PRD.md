@@ -813,3 +813,121 @@ buttons + warning banner), `frontend/src/App.js` (two new routes).
   - Multi-document MongoDB transactions still require replica-set
   - Real email/SMS/Blink, OCR, AI extraction still out of scope
 
+
+---
+
+## EB-15 · Production Scheduling, Live Notifications & Operational Automation (2026-02-04)
+
+**Status**: ✅ Delivered, backend regression-clean, frontend end-to-end
+validated by testing agent. `main` untouched, no deploy, no GitHub push.
+
+### What shipped
+- Compact single-module implementation: `/app/backend/scheduler_module.py`
+  (1335 lines) exposing `build_automation_router` and
+  `build_scheduler_internal_router`, both wired into `server.py`.
+- 16 job definitions registered in `scheduled_job_definitions`
+  (notifications.dispatch/retry/dead_letter/escalation, numbering.*,
+  activation.*, storage.*, migration.*, documents.review_reminders,
+  compliance.scan).
+- 12 built-in notification templates seeded into `notification_templates`
+  (compliance_due_soon, compliance_expired, critical_defect,
+  activation_ready/blocked, override_expiring/expired, migration_completed/
+  failed, storage_reconciliation_failed, export_completed,
+  document_review_reminder).
+- Four production-capable provider adapters — Development (default),
+  SMTP via stdlib `smtplib`, SendGrid REST v3 via `httpx`, Twilio REST via
+  `httpx`. **No SDK dependencies added**.
+- Delivery pipeline with exponential backoff `[0, 5m, 15m, 60m, 4h]`,
+  dead-letter, quiet hours (Australia/Melbourne configurable),
+  Critical-priority override that never overrides SMS, circuit breaker
+  (`open` → `half-open` → `closed`), suppression logging.
+- Manager+ actions: run job now, enable/disable, retry/cancel/resolve
+  delivery, template create/edit/approve/clone. Admin actions: reset
+  circuit breaker.
+- Frontend administration surface: `/administration/automation` (hub),
+  `/administration/automation/jobs`, `/administration/automation/deliveries`,
+  `/administration/automation/providers` (providers + templates table).
+  Hub tile added to Command Hub (`automation-hub-card`).
+
+### API endpoints
+- `GET  /api/automation/status`
+- `GET  /api/automation/jobs`, `GET /api/automation/jobs/{key}`,
+  `POST /api/automation/jobs/{key}/run|enable|disable`
+- `GET  /api/automation/job-runs`, `GET /api/automation/job-runs/{id}`,
+  `POST /api/automation/job-runs/{id}/retry|cancel`
+- `GET  /api/automation/deliveries`, `GET /.../{id}`, `GET /.../{id}/attempts`,
+  `POST /.../{id}/retry|cancel|resolve`
+- `GET  /api/automation/providers`,
+  `POST /api/automation/providers/{key}/health-check`,
+  `POST /api/automation/providers/{key}/reset-circuit`
+- `GET/POST/PUT /api/automation/notification-templates(/…)/approve|clone`
+- `POST /api/internal/scheduler/{job_key}` — service-token auth
+  (`X-Scheduler-Token` HMAC-compared) with optional IP allow-list.
+
+### Collections added / touched
+- New: `scheduled_job_definitions`, `scheduled_job_runs`,
+  `scheduled_job_events`, `scheduled_job_locks`,
+  `automation_health_snapshots`, `notification_delivery_attempts`,
+  `notification_provider_events`, `notification_suppression_events`,
+  `notification_templates`, `notification_provider_health`.
+- Touched (read/update only): `notifications`, `notification_deliveries`,
+  `migration_approvals`.
+- All new IDs are UUID strings; all timestamps are ISO-8601 UTC. Indexes
+  ensured via `ensure_indexes(db)` at startup.
+
+### Constraints honoured
+- ❌ No SendGrid/Twilio SDKs — only `httpx` REST.
+- ❌ No permanent in-process cron loops.
+- ❌ No live network calls in tests. All provider I/O is mocked via
+  `httpx.MockTransport` and `unittest.mock.patch(scheduler_module.smtplib.SMTP)`.
+- ❌ No real provider credentials in `.env`; delivery is opt-in via
+  `NOTIFICATION_DELIVERY_ENABLED=true`.
+- ❌ No real ACE data, no deploy, no GitHub push.
+- ✅ Development Outbox remains the default; test mode on by default.
+- ✅ PII masking for non-Admin roles at API layer
+  (`email_address_masked` / `mobile_number_masked`).
+
+### Defects found and fixed in this session
+1. **`RuntimeError: Event loop is closed`** in
+   `test_notifications_retry_reactivates_scheduled` — Motor client was
+   instantiated at method scope and shared across two `asyncio.run()`
+   invocations. Fix: instantiate a fresh `AsyncIOMotorClient` inside each
+   async block and close it via `db.client.close()` in `finally`.
+   Verified by `bug_testing_agent` (target test 3/3 passes deterministically).
+2. **Duplicate `data-testid` on Providers page** — surfaced by frontend
+   testing agent. Fix: suffix testid with channel:
+   `provider-card-{provider_key}-{channel}`.
+
+### Verification totals
+- Backend suite: **499 passed, 4 skipped** (baseline 451 passed, 4 skipped;
+  net +48 EB-15 tests, 0 regressions). Runtime ≈ 408s.
+- Frontend testing agent (iteration_20.json): 5/5 test suites PASS at 100%
+  — Automation Hub, Jobs page, Deliveries page, Providers page, ReadOnly
+  RBAC redirect.
+
+### Files added / changed (EB-15)
+- `backend/scheduler_module.py` (new; ~1335 lines)
+- `backend/server.py` (import + router registration only)
+- `backend/tests/test_scheduler_eb15.py` (new; 48 tests)
+- `backend/.env` (added `SCHEDULER_ENABLED`, `SCHEDULER_SERVICE_TOKEN`,
+  `EMAIL_PROVIDER`, `SMS_PROVIDER`, and related non-secret defaults)
+- `frontend/src/pages/AutomationHub.jsx` (new)
+- `frontend/src/pages/AutomationJobsPage.jsx` (new)
+- `frontend/src/pages/AutomationDeliveriesPage.jsx` (new)
+- `frontend/src/pages/AutomationProvidersPage.jsx` (new)
+- `frontend/src/App.js` (4 new routes, 4 new imports)
+- `frontend/src/pages/Hub.jsx` (added `automation-hub-card` tile)
+- Docs: `memory/EB-15-K8S-CRONJOBS.md`,
+  `memory/EB-15-OPERATIONS-RUNBOOK.md`,
+  `memory/EB-15-TECHNICAL-NOTE.md`
+
+### Remaining limitations (rolled into EB-16 / Phase 3 backlog)
+- Escalation deduplication endpoint returns placeholder counts
+  (`{escalations_created: 0, deduped: 0}`); needs real drivers.
+- No webhook receivers yet for SendGrid/Twilio delivery-status callbacks
+  (provider reply from the send call is authoritative).
+- `automation_health_snapshots` collection is indexed but not yet
+  materialised by any job — reserved for future health-history endpoint.
+- Real ACE spreadsheet data migration (EB-16 / Phase 3).
+- OCR / AI document extraction (P2).
+

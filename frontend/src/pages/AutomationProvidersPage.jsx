@@ -85,7 +85,7 @@ export default function AutomationProvidersPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           {rows.map((r) => (
             <div key={`${r.provider_key}-${r.channel}`}
-                 data-testid={`provider-card-${r.provider_key}`}
+                 data-testid={`provider-card-${r.provider_key}-${r.channel}`}
                  className="bg-white border border-slate-200 rounded-xl p-4">
               <div className="flex items-center gap-3 mb-3">
                 <div className="p-2 bg-indigo-50 text-indigo-700 rounded-lg">

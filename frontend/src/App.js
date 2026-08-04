@@ -31,6 +31,10 @@ import MigrationDryRunsPage from "./pages/MigrationDryRunsPage";
 import StorageAdmin from "./pages/StorageAdmin";
 import MigrationCommitHub from "./pages/MigrationCommitHub";
 import MigrationDryRunDetailPage from "./pages/MigrationDryRunDetailPage";
+import AutomationHub from "./pages/AutomationHub";
+import AutomationJobsPage from "./pages/AutomationJobsPage";
+import AutomationDeliveriesPage from "./pages/AutomationDeliveriesPage";
+import AutomationProvidersPage from "./pages/AutomationProvidersPage";
 
 function App() {
   return (
@@ -208,6 +212,10 @@ function App() {
             <Route path="/migration-preparation/mappings" element={<ProtectedRoute><MigrationMappingsPage /></ProtectedRoute>} />
             <Route path="/migration-preparation/dry-runs" element={<ProtectedRoute><MigrationDryRunsPage /></ProtectedRoute>} />
             <Route path="/migration-preparation/dry-runs/:dryRunId" element={<ProtectedRoute><MigrationDryRunDetailPage /></ProtectedRoute>} />
+            <Route path="/administration/automation" element={<ProtectedRoute><AutomationHub /></ProtectedRoute>} />
+            <Route path="/administration/automation/jobs" element={<ProtectedRoute><AutomationJobsPage /></ProtectedRoute>} />
+            <Route path="/administration/automation/deliveries" element={<ProtectedRoute><AutomationDeliveriesPage /></ProtectedRoute>} />
+            <Route path="/administration/automation/providers" element={<ProtectedRoute><AutomationProvidersPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster position="top-right" richColors closeButton />

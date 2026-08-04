@@ -546,6 +546,15 @@ async def on_startup():
     # --- EB-14 Migration Commit & Backfill ---
     from migration_commit_module import ensure_indexes as mc_ensure_indexes
     await mc_ensure_indexes(db)
+    # --- EB-15 Scheduler & Automation ---
+    from scheduler_module import (
+        ensure_indexes as sch_ensure_indexes,
+        SchedulerService, ProviderRegistry, _seed_templates,
+    )
+    await sch_ensure_indexes(db)
+    _providers = ProviderRegistry()
+    await SchedulerService(db, _providers).seed_registry()
+    await _seed_templates(db)
 
 
 # Include router and CORS
@@ -605,6 +614,13 @@ from migration_commit_module import (  # noqa: E402
 )
 app.include_router(build_migration_commit_router(db, get_current_user))
 app.include_router(build_storage_backfill_router(db, get_current_user))
+
+# --- EB-15 Scheduler & Automation ---
+from scheduler_module import (  # noqa: E402
+    build_automation_router, build_scheduler_internal_router,
+)
+app.include_router(build_automation_router(db, get_current_user))
+app.include_router(build_scheduler_internal_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

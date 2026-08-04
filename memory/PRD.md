@@ -458,3 +458,126 @@ buttons + warning banner), `frontend/src/App.js` (two new routes).
 - No fuzzy matching — deterministic exact-key only. This is intentional.
 - No commit endpoint. Real migration is EB-13.
 
+
+### Phase 2 · EB-13 Private Object Storage & Secure File Delivery (2026-08-04)
+- **New backend module** `backend/storage_module.py`: `StorageAdapter` interface
+  with two concrete implementations — `LocalStorageAdapter` (dev filesystem)
+  and `S3CompatibleStorageAdapter` (AWS S3 / Cloudflare R2 / Backblaze B2 /
+  MinIO via `boto3`). `StorageService` centralises put/get/verify/archive/
+  restore/quarantine/reconcile with SHA-256 integrity, signed URLs (S3 only),
+  metadata tracking, and role-gated access.
+- **6 new UUID-keyed MongoDB collections**: `storage_objects`,
+  `storage_object_versions`, `storage_events` (append-only audit),
+  `storage_migration_jobs`, `storage_reconciliation_runs`,
+  `storage_retention_policies`. `ensure_indexes` and
+  `seed_retention_policies` run on startup (5 default policies:
+  Standard Operational, Compliance Evidence Long, Generated Export
+  Historical, Migration Source Retention, Temporary Upload).
+- **~22 new API routes** at `/api/storage/*`: health, configuration-status,
+  objects (list / get / versions / archive / restore / verify / quarantine
+  / preview / download), migrations (create / list / execute / retry),
+  reconciliation (start / list / get), retention-policies (list / create
+  / update / archive). All role-gated: ReadOnly denied; Manager/Admin can
+  run jobs; Admin-only for quarantine + retention CRUD.
+- **EB-12 integration (bytes out of Mongo)**: new workbook uploads at
+  `POST /api/migration-prep/workbooks/profile` now route bytes through the
+  StorageService — the workbook document stores `storage_object_id` and
+  **no longer stores `_data`**. Validation reads prefer the storage
+  service; legacy workbooks with `_data` remain readable and can be moved
+  via the new Migration Jobs UI.
+- **EB-05 integration**: `POST /api/documents/upload` and new-version
+  endpoints now additively call `StorageService.register_existing`; the
+  new document + version rows carry `storage_object_id`. Bytes still land
+  on the LocalAdapter root (same filesystem path), giving admins a unified
+  view of every stored file inside the Storage Administration surface.
+- **EB-11 integration**: generated Start Sheet / Profile PDFs are
+  registered in the storage service after render; `driver_export_versions`
+  and the underlying `documents`/`document_versions` rows carry
+  `storage_object_id`.
+- **Security posture**:
+  - `/api/storage/configuration-status` returns ONLY `{backend, configured,
+    signed_url_ttl, root_configured, max_upload_bytes}` — never a secret,
+    access key, session token or password.
+  - Storage object list endpoint strips `object_key` — internal keys are
+    never leaked to the browser.
+  - Object keys use UUIDs only (no PII), namespaced by `APP_ENV`.
+  - S3 puts include `ServerSideEncryption=AES256`.
+  - Blocked extensions (exe/bat/cmd/sh/js/vbs/ps1/html/htm) + PDF magic
+    header check on upload validation.
+  - ReadOnly cannot list objects, run jobs, or CRUD policies. Route also
+    guarded on the frontend via `<Navigate to="/hub" />`.
+- **Frontend**: new `/administration/storage` page (`StorageAdmin.jsx`,
+  ~560 lines): Adapter/Objects/Missing/TTL tiles, jobs strip (Run
+  Reconciliation, Queue Migration), Storage Objects table with search +
+  status filter + per-row Verify / Archive / Restore actions, side-by-side
+  Migration Jobs + Reconciliation Runs tables, Retention Policies table
+  with Admin-only Add-policy modal. Hub gains a `storage-admin-card` tile.
+- **Env config**: `.env.example` documents all EB-13 keys. Defaults in
+  `.env` keep the preview environment on the local adapter — no real cloud
+  credentials are stored.
+- **Tests**: 26 new pytest cases in `backend/tests/test_storage_eb13.py`
+  covering:
+  - Live LocalAdapter smoke via API (health, configuration-status leak
+    scan, role denies, retention seed present)
+  - EB-12 workbook integration (upload → `storage_object_id` set, no
+    `_data` in response, object visible via /api/storage/objects/{id})
+  - Retention CRUD + invalid-class rejection
+  - Reconciliation & Migration job endpoints incl. RBAC
+  - **moto-mocked S3 adapter unit tests** (put/get/exists/head/delete/copy/
+    signed_url/list_prefix/health/encryption-header)
+  - Direct LocalAdapter tests (put/get/delete/list/health)
+  - Security: object_key never exposed in list endpoint
+- **Backend suite total**: **~418 passed, 4 skipped, 0 failed** (up from
+  395; +26 new EB-13 tests. 3 pre-existing `notification-jobs/*-scan`
+  timeouts fixed by clearing an accumulated 880k-row
+  `notification_deliveries` collection — data hygiene, not a code change).
+- **Frontend `testing_agent_v3_fork` iteration_17**: 100% of EB-13
+  acceptance criteria PASS. Storage Admin page renders all 4 tiles, 351+
+  objects listed, retention CRUD works, reconciliation & migration jobs
+  execute, EB-12 uploads carry `storage_object_id`, EB-05 uploads register
+  as storage objects, ReadOnly correctly 403'd (now also route-guarded on
+  frontend), Hub tile navigates, configuration-status contains no
+  credential-shaped keys, regression sweep clean.
+- **No** external providers activated, **no** real ACE data imported,
+  **no** production deploy, **no** GitHub push, `main` untouched.
+  `/app/VERSION` → `dcc-phase2-eb13`.
+
+**Files added (3):**
+- `backend/storage_module.py`
+- `backend/tests/test_storage_eb13.py`
+- `frontend/src/pages/StorageAdmin.jsx`
+
+**Files changed (7):**
+- `backend/server.py` — EB-13 startup + router wiring
+- `backend/.env` + `backend/.env.example` — EB-13 config keys (all safe
+  defaults; S3 fields commented out)
+- `backend/migration_prep_module.py` — new workbook uploads now use
+  StorageService instead of inline `_data`; reader falls back to `_data`
+  for legacy workbooks
+- `backend/documents_module.py` — `register_existing` on new upload
+- `backend/driver_export_module.py` — `register_existing` on PDF export
+- `frontend/src/App.js` — new `/administration/storage` route
+- `frontend/src/pages/Hub.jsx` — new `storage-admin-card` tile
+
+**Known limitations (still open after EB-13):**
+- Preview environment intentionally runs on LocalAdapter only; no real S3
+  bucket / credentials are configured. Switching to production requires
+  populating the commented-out `OBJECT_STORAGE_*` env vars at deploy time.
+- Malware scanning still mocked (`_malware_scan_status`).
+- Legacy EB-05 documents and EB-11 exports created BEFORE this build
+  don't have `storage_object_id`. Backfill is available via
+  `/api/storage/migrations` (scope currently limited to Migration
+  Workbooks; document/export backfill deferred to EB-14).
+- Email / SMS still simulated (Development Outbox).
+- No real ACE spreadsheet data has been imported.
+
+**EB-14 dependencies (Phase 3):**
+- Backfill EB-05 documents & EB-11 exports into `storage_objects` when
+  moving to S3-compatible production bucket.
+- Cross-sheet foreign-key resolution (Driver↔Owner via ABN) in the
+  migration prep pipeline.
+- Real ACE workbook import with per-domain mapping profiles + full
+  Go/No-Go pass.
+- Production scheduler (Kubernetes CronJob) driving reconciliation +
+  notifications on a real cadence.
+

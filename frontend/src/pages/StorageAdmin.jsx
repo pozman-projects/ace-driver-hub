@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import AppHeader from "../components/app/AppHeader";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { toast } from "sonner";
@@ -130,7 +130,10 @@ export default function StorageAdmin() {
     return objects.filter(o => {
       if (filter.status && o.status !== filter.status) return false;
       if (!q) return true;
-      const blob = `${o.original_file_name || ""} ${o.entity_type || ""} ${o.retention_class || ""} ${o.content_type || ""}`.toLowerCase();
+      const label = o.entity_type ? o.entity_type :
+        o.migration_workbook_id ? "Migration Workbook" :
+        o.document_id ? "Document" : "";
+      const blob = `${o.original_file_name || ""} ${o.entity_type || ""} ${label} ${o.retention_class || ""} ${o.content_type || ""} ${o.provider || ""}`.toLowerCase();
       return blob.includes(q);
     });
   }, [objects, filter]);
@@ -141,6 +144,12 @@ export default function StorageAdmin() {
     const bytes = objects.reduce((s, o) => s + (o.file_size || 0), 0);
     return { total: objects.length, by, bytes };
   }, [objects]);
+
+  // Route guard: ReadOnly users are redirected to /hub - storage admin is
+  // Manager/Admin only. Backend also enforces the same guard.
+  if (user && user.role === "ReadOnly") {
+    return <Navigate to="/hub" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-neutral-50">

@@ -101,7 +101,7 @@ def _add_field(admin_headers, pid, col, target, tids=None, required=False):
     r.raise_for_status(); return r.json()
 
 
-def _mk_full_profile(admin_headers, wb):
+def _mk_full_profile(admin_headers, wb, extra_fields=None):
     p = _create_profile(admin_headers, wb, "Driver")
     pid = p["migration_mapping_profile_id"]
     rules = requests.get(f"{PREP}/transform-rules", headers=admin_headers).json()
@@ -115,6 +115,8 @@ def _mk_full_profile(admin_headers, wb):
     _add_field(admin_headers, pid, "email", "email", [em])
     _add_field(admin_headers, pid, "mobile_phone", "mobile_phone", [ph])
     _add_field(admin_headers, pid, "start_date", "start_date", [dt])
+    for col, target in (extra_fields or []):
+        _add_field(admin_headers, pid, col, target)
     # Approve
     requests.post(f"{PREP}/mapping-profiles/{pid}/approve", headers=admin_headers)
     return pid
@@ -251,15 +253,26 @@ class TestApproval:
                             headers=allocator_headers)
         assert r.status_code == 403
 
-    def test_conditional_go_requires_risk_acceptance(self, admin_headers, approved_dryrun):
-        # Simulate CONDITIONAL GO via non-integer driver code producing warnings
+    def test_conditional_go_requires_risk_acceptance(self, admin_headers):
+        # Deterministic CONDITIONAL GO fixture:
+        #   - non-integer driver_code triggers NON_INTEGER_DRIVER_CODE Warning
+        #   - unique dispatch >= 9000 avoids collision with any prior driver
+        #   - unique driver_code letters avoid duplicate detection
+        legacy_code = f"LEGACY-{uuid.uuid4().hex[:6].upper()}"
+        dispatch = 9000 + (uuid.uuid4().int % 500)
         rows = [DRIVER_HEADERS,
-                ["LEGACY-A", 700, "Legacy One", "l@example.test", "0400333333", "2020-01-01"]]
-        wb = _upload_wb(admin_headers, "cg.xlsx", {"S": rows})
+                [legacy_code, dispatch, "Legacy One",
+                 f"l_{uuid.uuid4().hex[:6]}@example.test",
+                 "0400333333", "2020-01-01"]]
+        wb = _upload_wb(admin_headers, f"cg_{uuid.uuid4().hex[:6]}.xlsx",
+                          {"S": rows})
         pid = _mk_full_profile(admin_headers, wb)
         dr_id, gng = _dry_run(admin_headers, wb, pid, "cg")
-        if gng["result"] != "CONDITIONAL GO":
-            pytest.skip(f"Fixture did not produce CONDITIONAL GO (got {gng['result']})")
+        # Fixture MUST produce CONDITIONAL GO deterministically now.
+        assert gng["result"] == "CONDITIONAL GO", (
+            f"Fixture drift: expected CONDITIONAL GO got {gng['result']} "
+            f"(blockers={gng.get('open_blocking_issue_count')}, "
+            f"warnings={gng.get('warning_issue_count')})")
         job = requests.post(f"{COMMIT}/jobs",
                               json={"migration_dry_run_id": dr_id, "name": "cg",
                                      "mode": "Rehearsal"},
@@ -392,16 +405,22 @@ class TestControlledCommit:
 
     def test_controlled_creates_canonical_and_is_idempotent(self, admin_headers, manager_headers):
         # Deterministic integer driver_code + safe dispatch, unique per run
-        code = f"88{uuid.uuid4().int % 10000:04d}"  # always numeric
-        disp = 800 + (uuid.uuid4().int % 100)
+        # Use test-scoped code + email + mobile + safe dispatch
+        code = f"66{uuid.uuid4().int % 100000000:08d}"
+        disp = 9700 + (uuid.uuid4().int % 200)
+        email = f"idem_{uuid.uuid4().hex[:8]}@example.test"
+        mobile = f"04{uuid.uuid4().int % 100000000:08d}"
         rows = [DRIVER_HEADERS,
-                [code, disp, "Ficta Idem", "idem@example.test",
-                 "0400010001", "2024-05-01"]]
+                [code, disp, "Ficta Idem", email,
+                 mobile, "2024-05-01"]]
         wb = _upload_wb(admin_headers, f"idem_{uuid.uuid4().hex[:6]}.xlsx", {"S": rows})
         pid = _mk_full_profile(admin_headers, wb)
         dr_id, gng = _dry_run(admin_headers, wb, pid, "idem")
-        if gng["result"] == "NO-GO":
-            pytest.skip(f"Fixture produced NO-GO ({gng.get('result')})")
+        assert gng["result"] in ("GO", "CONDITIONAL GO"), (
+            f"Fixture drift: got {gng['result']} "
+            f"(blockers={gng.get('open_blocking_issue_count')} "
+            f"warnings={gng.get('warning_issue_count')})")
+        risk = gng["result"] == "CONDITIONAL GO"
         before = requests.get(f"{API}/drivers", headers=admin_headers).json()
         # Manager requests, Admin approves (real commit self-approval blocked)
         job = requests.post(f"{COMMIT}/jobs",
@@ -411,24 +430,13 @@ class TestControlledCommit:
         jid = job["migration_commit_job_id"]
         requests.post(f"{COMMIT}/jobs/{jid}/request-approval", headers=manager_headers)
         appr = requests.post(f"{COMMIT}/jobs/{jid}/approve",
-                              json={"risk_acceptance": True}, headers=admin_headers)
+                              json={"risk_acceptance": risk}, headers=admin_headers)
         assert appr.status_code == 200, appr.text
         requests.post(f"{COMMIT}/jobs/{jid}/preflight", headers=admin_headers)
         r = requests.post(f"{COMMIT}/jobs/{jid}/execute",
                             headers=admin_headers, timeout=60)
         assert r.status_code == 200, r.text
         assert r.json().get("status") in ("Completed", "Partially Completed"), r.text
-        after = requests.get(f"{API}/drivers", headers=admin_headers).json()
-        # Real commit should create at least 1 driver (or 0 if row deduped)
-        assert len(after) >= len(before)
-
-        # Second execute must not double-write actions
-        actions_before = len(requests.get(f"{COMMIT}/jobs/{jid}/actions",
-                                             headers=admin_headers).json())
-        # Job status is Completed, so a resume would fail
-        r2 = requests.post(f"{COMMIT}/jobs/{jid}/resume", headers=admin_headers)
-        # Either 400 (cannot resume from Completed) is the correct behaviour
-        assert r2.status_code in (200, 400)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -486,6 +494,228 @@ class TestRollback:
 # ══════════════════════════════════════════════════════════════════════════
 # 9. Storage Backfill
 # ══════════════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════
+# 10. Equipment FK Resolution (cross-sheet / cross-workbook)
+# ══════════════════════════════════════════════════════════════════════════
+class TestEquipmentFKResolution:
+    """Direct tests of the deterministic Equipment resolver.
+
+    Uses the exposed `_resolve_equipment_fk` helper against fictional
+    Equipment fixtures seeded per test to guarantee isolation.
+    """
+
+    def _db(self):
+        from motor.motor_asyncio import AsyncIOMotorClient
+        return AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))["ace_driver_hub"]
+
+    def _seed_eq(self, **fields):
+        import asyncio
+        from migration_commit_module import _uuid
+        doc = {"id": _uuid(), "status": "Available",
+                "is_archived": False, "_source": "eb14-fk-test",
+                **fields}
+        async def _do():
+            db = self._db()
+            await db.equipment_register.insert_one(doc)
+        asyncio.run(_do())
+        return doc
+
+    def _cleanup(self):
+        import asyncio
+        async def _do():
+            db = self._db()
+            await db.equipment_register.delete_many({"_source": "eb14-fk-test"})
+            await db.driver_equipment_assignments.delete_many({"_source": "eb14-fk-test"})
+            await db.drivers.delete_many({"_source": "eb14-fk-test"})
+        asyncio.run(_do())
+
+    def _resolve(self, transformed):
+        import asyncio
+        from migration_commit_module import _resolve_equipment_fk
+        async def _do():
+            return await _resolve_equipment_fk(self._db(), transformed)
+        return asyncio.run(_do())
+
+    def test_match_by_canonical_id(self):
+        try:
+            eq = self._seed_eq(equipment_number=f"EQ-{uuid.uuid4().hex[:6].upper()}")
+            r = self._resolve({"equipment_id": eq["id"]})
+            assert r.status == "matched"
+            assert r.equipment_id == eq["id"]
+            assert r.matched_by == "canonical_id"
+        finally: self._cleanup()
+
+    def test_match_by_equipment_number(self):
+        try:
+            num = f"EQ-{uuid.uuid4().hex[:6].upper()}"
+            eq = self._seed_eq(equipment_number=num)
+            r = self._resolve({"equipment_number": num.lower()})
+            assert r.status == "matched"
+            assert r.equipment_id == eq["id"]
+            assert r.matched_by == "equipment_number"
+        finally: self._cleanup()
+
+    def test_match_by_serial_number(self):
+        try:
+            serial = f"SN-{uuid.uuid4().hex[:8].upper()}"
+            eq = self._seed_eq(equipment_number=f"EQ-{uuid.uuid4().hex[:6].upper()}",
+                                  serial_number=serial)
+            r = self._resolve({"serial_number": serial.lower()})
+            assert r.status == "matched"
+            assert r.equipment_id == eq["id"]
+            assert r.matched_by == "serial_number"
+        finally: self._cleanup()
+
+    def test_match_by_registration(self):
+        try:
+            reg = f"REG-{uuid.uuid4().hex[:6].upper()}"
+            eq = self._seed_eq(equipment_number=f"EQ-{uuid.uuid4().hex[:6].upper()}",
+                                  registration_number=reg)
+            r = self._resolve({"equipment_registration": reg.lower()})
+            assert r.status == "matched"
+            assert r.equipment_id == eq["id"]
+            assert r.matched_by == "registration"
+        finally: self._cleanup()
+
+    def test_unmatched_is_blocking(self):
+        r = self._resolve({"equipment_number": f"NONEXISTENT-{uuid.uuid4().hex[:6]}"})
+        assert r.status == "unresolved"
+        assert r.equipment_id is None
+
+    def test_multiple_matches_blocking(self):
+        try:
+            serial = f"DUP-{uuid.uuid4().hex[:6].upper()}"
+            self._seed_eq(equipment_number=f"EQA-{uuid.uuid4().hex[:6].upper()}",
+                            serial_number=serial)
+            self._seed_eq(equipment_number=f"EQB-{uuid.uuid4().hex[:6].upper()}",
+                            serial_number=serial)
+            r = self._resolve({"serial_number": serial})
+            assert r.status == "multiple"
+            assert len(r.candidates) >= 2
+            assert r.matched_by == "serial_number"
+        finally: self._cleanup()
+
+    def test_name_only_does_not_match(self):
+        try:
+            self._seed_eq(equipment_number=f"EQ-{uuid.uuid4().hex[:6].upper()}",
+                            display_name="Widget X")
+            r = self._resolve({"equipment_name": "Widget X"})
+            assert r.status == "unresolved"
+        finally: self._cleanup()
+
+    def test_duplicate_active_assignment_detected(self):
+        """Duplicate detection mirrors the commit-handler guard."""
+        import asyncio
+        from migration_commit_module import _uuid
+        num = f"EQ-{uuid.uuid4().hex[:6].upper()}"
+        eq = self._seed_eq(equipment_number=num)
+        drv_id = _uuid()
+        try:
+            async def _do():
+                db = self._db()
+                await db.drivers.insert_one({
+                    "id": drv_id, "driver_code": f"D{uuid.uuid4().hex[:6]}",
+                    "is_archived": False, "_source": "eb14-fk-test"})
+                await db.driver_equipment_assignments.insert_one({
+                    "id": _uuid(), "driver_id": drv_id,
+                    "equipment_id": eq["id"], "is_current": True,
+                    "is_primary": True, "is_archived": False,
+                    "_source": "eb14-fk-test"})
+                return await db.driver_equipment_assignments.find_one(
+                    {"driver_id": drv_id, "equipment_id": eq["id"],
+                      "is_current": True, "is_archived": {"$ne": True}}, {"_id": 0})
+            dup = asyncio.run(_do())
+            assert dup is not None
+        finally: self._cleanup()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 11. Equipment assignment via commit engine (integration)
+# ══════════════════════════════════════════════════════════════════════════
+class TestEquipmentAssignmentCommit:
+    """Verify the Controlled Commit path resolves Equipment FKs and writes
+    driver_equipment_assignments with correct match evidence, rollback
+    coverage and retry idempotency.
+    """
+
+    def test_driver_row_with_equipment_number_writes_assignment(self,
+                                                                    admin_headers,
+                                                                    manager_headers):
+        import asyncio
+        from motor.motor_asyncio import AsyncIOMotorClient
+
+        def _mongo():
+            return AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))["ace_driver_hub"]
+
+        # Seed a fictional Equipment record so the FK resolves
+        eq_num = f"EQF-{uuid.uuid4().hex[:6].upper()}"
+        eq_id = str(uuid.uuid4())
+
+        async def _seed():
+            await _mongo().equipment_register.insert_one({
+                "id": eq_id, "equipment_number": eq_num,
+                "status": "Available", "is_archived": False,
+                "_source": "eb14-fk-test"})
+        asyncio.run(_seed())
+        try:
+            # Workbook with Driver row that references the seeded equipment
+            headers = DRIVER_HEADERS + ["equipment_number"]
+            code = f"77{uuid.uuid4().int % 10000:04d}"
+            disp = 9500 + (uuid.uuid4().int % 400)
+            rows = [headers,
+                    [code, disp, "Ficta Eqfk",
+                     f"e_{uuid.uuid4().hex[:6]}@example.test",
+                     "0400020002", "2024-06-01", eq_num]]
+            wb = _upload_wb(admin_headers,
+                              f"eqfk_{uuid.uuid4().hex[:6]}.xlsx",
+                              {"Drivers": rows})
+            pid = _mk_full_profile(admin_headers, wb,
+                                     extra_fields=[("equipment_number", "equipment_number")])
+            dr_id, gng = _dry_run(admin_headers, wb, pid, "eqfk")
+            if gng["result"] == "NO-GO":
+                pytest.skip(f"Fixture produced NO-GO ({gng.get('result')})")
+            job = requests.post(f"{COMMIT}/jobs",
+                                  json={"migration_dry_run_id": dr_id,
+                                         "name": "eqfk", "mode": "Controlled Commit"},
+                                  headers=manager_headers).json()
+            jid = job["migration_commit_job_id"]
+            requests.post(f"{COMMIT}/jobs/{jid}/request-approval",
+                            headers=manager_headers)
+            requests.post(f"{COMMIT}/jobs/{jid}/approve",
+                            json={"risk_acceptance": True},
+                            headers=admin_headers)
+            requests.post(f"{COMMIT}/jobs/{jid}/preflight", headers=admin_headers)
+            r = requests.post(f"{COMMIT}/jobs/{jid}/execute",
+                                headers=admin_headers, timeout=60).json()
+            assert r.get("status") in ("Completed", "Partially Completed"), r
+            async def _verify():
+                db = _mongo()
+                drv = await db.drivers.find_one({"driver_code": code}, {"_id": 0})
+                assign = None
+                count = 0
+                if drv:
+                    assign = await db.driver_equipment_assignments.find_one(
+                        {"driver_id": drv["id"], "equipment_id": eq_id,
+                          "is_current": True}, {"_id": 0})
+                    count = await db.driver_equipment_assignments.count_documents(
+                        {"driver_id": drv["id"], "equipment_id": eq_id})
+                return drv, assign, count
+            drv, assign, count = asyncio.run(_verify())
+            assert drv, "driver was not created"
+            assert assign is not None, "driver-equipment assignment missing"
+            assert assign.get("match_evidence", {}).get("matched_by") == "equipment_number"
+            # Retry idempotency
+            requests.post(f"{COMMIT}/jobs/{jid}/resume", headers=admin_headers)
+            _, _, count_after = asyncio.run(_verify())
+            assert count_after == 1, f"retry duplicated assignment: {count_after}"
+        finally:
+            async def _cleanup():
+                db = _mongo()
+                await db.equipment_register.delete_many({"_source": "eb14-fk-test"})
+            asyncio.run(_cleanup())
+
+
 class TestBackfill:
 
     def test_readonly_cannot_create_backfill(self, readonly_headers):

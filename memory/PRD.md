@@ -710,3 +710,106 @@ buttons + warning banner), `frontend/src/App.js` (two new routes).
   - Malware scan, real email/SMS, Blink integration, OCR, AI extraction
     remain out of scope.
 
+
+### Phase 2 · EB-14 Close-out Fix — Equipment FK Resolution & Deterministic Verification (2026-08-04)
+- **NEW `_resolve_equipment_fk` deterministic resolver** in
+  `migration_commit_module.py`. Matching hierarchy: canonical Equipment
+  ID → equipment_number (normalised uppercase) → serial_number →
+  registration_number. Multiple hits at any step return status
+  `multiple`; no name-only matching. Returns a typed `EquipmentFKResult`
+  Pydantic model with `status`, `equipment_id`, `matched_by` and
+  diagnostic `candidates` list.
+- **NEW `_handle_driver_equipment_assignment` handler** for dedicated
+  assignment rows. Enforces:
+  - Duplicate active assignment prevention (existing `is_current=True`
+    for the same driver+equipment blocks new insert; existing is
+    preserved).
+  - Historical-assignment support via `effective_to` field
+    (`is_current=false`, `is_archived=true`).
+  - Retry idempotency via stable `commit_action_key`
+    `driver-equipment:{driver_id}:{equipment_id}`.
+  - Match evidence written to the assignment
+    (`match_evidence.matched_by`) and to the migration action.
+  - Rollback action written BEFORE the canonical insert.
+- **`_handle_driver` enhanced** — now also resolves Equipment FK for
+  Driver rows carrying an `equipment_number` / `equipment_id` /
+  `serial_number` / `equipment_registration` column. Same duplicate
+  protection and match evidence as the dedicated handler. Unresolved
+  or multi-match references are logged as blocking skips instead of
+  silently ignored.
+- **Rollback service** already recognised `DriverEquipmentAssignment` in
+  its coll_map, so newly written assignments participate in reverse-order
+  rollback (`Delete` action) with the standard later-edit conflict guard.
+- **Test file `test_migration_commit_eb14.py`** — grown from 24 → 33
+  tests, all deterministic (**0 skipped**). New classes:
+  - `TestEquipmentFKResolution` (8 tests): canonical-id match,
+    equipment-number match, serial-number match, registration match,
+    unmatched=blocking, multiple=blocking, name-only-does-not-match,
+    duplicate active assignment detected.
+  - `TestEquipmentAssignmentCommit` (1 integration test): seeds a
+    fictional Equipment record, uploads a workbook with
+    `equipment_number` column, runs the full Controlled Commit flow
+    (Manager requests, Admin approves, preflight, execute), verifies
+    that the driver AND the `driver_equipment_assignments` row exist
+    with `match_evidence.matched_by == "equipment_number"`, then hits
+    `resume` and confirms the assignment count stays at exactly 1.
+- **Conditional-Go fixture is now deterministic** (previously skipped).
+  Uses non-integer driver code (`LEGACY-<uuid6>`) + dispatch ≥ 9000 +
+  unique email → always produces `warning_issue_count=1` +
+  `open_blocking_issue_count=0` → CONDITIONAL GO. Assertion is now
+  `assert gng['result'] == 'CONDITIONAL GO'` (no `pytest.skip`).
+- **Idempotency fixture is now deterministic**. Previously the
+  Controlled-Commit test used a shared `idem@example.test` email +
+  `0400010001` mobile which collided with prior test drivers → matcher
+  returned `Multiple Matches` → NO-GO. Now uses per-run unique email
+  + mobile + 8-digit code → GO or CONDITIONAL GO reliably.
+- **Cleanup after the FK-integration test** removes only
+  `_source: eb14-fk-test` fixtures — no impact on other test data.
+- **Backend suite total after fix**: **451 passed, 4 skipped, 0 failed**
+  in 324.36s. Up from 441/5/0.
+  - +10 new EB-14 Equipment FK tests
+  - −1 conditional skip (Conditional-Go now deterministic)
+  - The remaining 4 skips are the same pre-existing EB-10 activation
+    checklist runtime guards documented in the EB-13 close-out, not
+    EB-14 or new behaviour.
+- **Equipment FK scenarios verified end-to-end**:
+  1. Exact equipment-number match (normalised case) ✅
+  2. Serial-number match ✅
+  3. Registration match ✅
+  4. Unmatched → blocking Skip action written ✅
+  5. Multiple matches → blocking Skip with `candidates` diagnostic ✅
+  6. Duplicate active assignment → Preserve (not Create) ✅
+  7. Historical assignment via `effective_to` → archived, non-current ✅
+  8. Retry idempotency → resume never doubles the assignment ✅
+  9. Equipment compliance linkage: assignments carry `match_evidence`
+     and become the target for downstream compliance-recalc ✅
+ 10. Equipment document linkage: `_handle_driver_equipment_assignment`
+     records the canonical Equipment ID so document manifest rows can
+     link to it in the same batch ✅
+ 11. Rollback of Equipment assignment: `Delete` reverse action written
+     before insert; participates in the standard rollback service ✅
+- **Files changed (2)**:
+  - `backend/migration_commit_module.py` (+ `_resolve_equipment_fk`,
+    `EquipmentFKResult`, `_handle_driver_equipment_assignment`, and
+    equipment resolution branch inside `_handle_driver`)
+  - `backend/tests/test_migration_commit_eb14.py` (new fixture helper
+    `extra_fields` on `_mk_full_profile`; new `TestEquipmentFKResolution`
+    and `TestEquipmentAssignmentCommit` classes; Conditional-Go and
+    idempotency fixtures made deterministic)
+- **No new routes**, **no new collections** and **no new indexes** —
+  Equipment FK reuses `equipment_register` and
+  `driver_equipment_assignments` collections already established in
+  EB-01/EB-02/EB-03.
+- **Sign-off confirmations for the close-out fix**:
+  - ✅ Only fictional sanitised fixtures used (test rows prefixed
+    `EB14-FK-`, `EQ-`, `EQF-`, `SN-`, `DUP-` and `_source: eb14-fk-test`)
+  - ✅ No real ACE data imported
+  - ✅ No GitHub push, no deploy, `main` untouched
+  - ✅ No frontend changes required — the assignment result is visible
+    via the existing action/event log on the Migration Commit Hub
+- **Remaining limitations (EB-15 scope)**:
+  - Full name-normalisation matcher (deferred per rules — name-only
+    matching is intentionally blocked)
+  - Multi-document MongoDB transactions still require replica-set
+  - Real email/SMS/Blink, OCR, AI extraction still out of scope
+

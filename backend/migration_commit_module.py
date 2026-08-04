@@ -492,6 +492,66 @@ async def _resolve_vehicle_fk(db, transformed: dict) -> Optional[str]:
     return None
 
 
+class EquipmentFKResult(BaseModel):
+    """Deterministic Equipment FK resolution outcome."""
+    status: str = "unresolved"       # matched | unresolved | multiple
+    equipment_id: Optional[str] = None
+    matched_by: Optional[str] = None  # canonical_id | equipment_number | serial_number | registration
+    candidates: List[str] = Field(default_factory=list)  # for multiple-match diagnostics
+
+
+async def _resolve_equipment_fk(db, transformed: dict) -> EquipmentFKResult:
+    """Cross-sheet Equipment resolution.
+
+    Matching hierarchy (each step returns immediately on a unique hit;
+    a multi-hit at any step returns 'multiple'):
+        1. canonical Equipment ID
+        2. exact normalised equipment_number (uppercase, stripped)
+        3. exact serial_number
+        4. exact registration_number
+    Name-only matching is deliberately not performed.
+    """
+    # 1. canonical id
+    for key in ("equipment_id", "canonical_equipment_id"):
+        val = transformed.get(key)
+        if val:
+            hit = await db["equipment_register"].find_one({"id": val}, {"_id": 0})
+            if hit: return EquipmentFKResult(status="matched",
+                                                equipment_id=hit["id"],
+                                                matched_by="canonical_id")
+    # 2. equipment number
+    eqnum = str(transformed.get("equipment_number") or "").strip().upper()
+    if eqnum:
+        hits = await db["equipment_register"].find({"equipment_number": eqnum}, {"_id": 0}).to_list(5)
+        if len(hits) == 1: return EquipmentFKResult(status="matched",
+                                                        equipment_id=hits[0]["id"],
+                                                        matched_by="equipment_number")
+        if len(hits) > 1: return EquipmentFKResult(status="multiple",
+                                                       candidates=[h["id"] for h in hits],
+                                                       matched_by="equipment_number")
+    # 3. serial number
+    serial = str(transformed.get("serial_number") or "").strip().upper()
+    if serial:
+        hits = await db["equipment_register"].find({"serial_number": serial}, {"_id": 0}).to_list(5)
+        if len(hits) == 1: return EquipmentFKResult(status="matched",
+                                                        equipment_id=hits[0]["id"],
+                                                        matched_by="serial_number")
+        if len(hits) > 1: return EquipmentFKResult(status="multiple",
+                                                       candidates=[h["id"] for h in hits],
+                                                       matched_by="serial_number")
+    # 4. registration number
+    reg = str(transformed.get("equipment_registration") or transformed.get("registration_number") or "").strip().upper()
+    if reg:
+        hits = await db["equipment_register"].find({"registration_number": reg}, {"_id": 0}).to_list(5)
+        if len(hits) == 1: return EquipmentFKResult(status="matched",
+                                                        equipment_id=hits[0]["id"],
+                                                        matched_by="registration")
+        if len(hits) > 1: return EquipmentFKResult(status="multiple",
+                                                       candidates=[h["id"] for h in hits],
+                                                       matched_by="registration")
+    return EquipmentFKResult(status="unresolved")
+
+
 async def _handle_driver(db, job_id: str, batch_id: str, row_id: str, row: dict,
                            package_id: str, actor: str, dry_run_mode: bool) -> dict:
     """Driver create with EB-08 numbering integration."""
@@ -573,8 +633,142 @@ async def _handle_driver(db, job_id: str, batch_id: str, row_id: str, row: dict,
         await db["driver_vehicle_assignments"].insert_one(assign)
         await _write_rollback_action(db, package_id, 6, "DriverVehicleAssignment",
                                         assign["id"], "Delete", None, assign)
+    # Equipment cross-sheet resolution (deterministic hierarchy)
+    eq_fk = await _resolve_equipment_fk(db, transformed)
+    if eq_fk.status == "matched":
+        eq_key = f"driver-equipment:{drv_id}:{eq_fk.equipment_id}"
+        # Prevent duplicate active assignment (EB-03 rule)
+        dup = await db["driver_equipment_assignments"].find_one(
+            {"driver_id": drv_id, "equipment_id": eq_fk.equipment_id,
+              "is_current": True, "is_archived": {"$ne": True}}, {"_id": 0})
+        already = await db[ACTIONS_COLL].find_one(
+            {"commit_action_key": eq_key,
+              "migration_commit_job_id": job_id,
+              "state": {"$in": ["Applied", "Verified"]}}, {"_id": 0})
+        if dup:
+            await _write_action(db, job_id, batch_id, row_id,
+                                  "DriverEquipmentAssignment", "Preserve",
+                                  dup["id"], dup, dup, "Applied", eq_key, actor,
+                                  "existing current assignment")
+        elif already:
+            pass  # retry idempotency
+        else:
+            assign_eq = {"id": _uuid(), "driver_id": drv_id,
+                          "equipment_id": eq_fk.equipment_id,
+                          "is_current": True, "is_primary": True,
+                          "effective_from": _iso(), "effective_to": None,
+                          "is_archived": False,
+                          "assignment_source": "migration-commit",
+                          "match_evidence": {"matched_by": eq_fk.matched_by},
+                          "created_at": _iso(), "created_by": actor,
+                          "_source": "migration-commit"}
+            await db["driver_equipment_assignments"].insert_one(assign_eq)
+            await _write_rollback_action(db, package_id, 7,
+                                            "DriverEquipmentAssignment",
+                                            assign_eq["id"], "Delete", None,
+                                            assign_eq)
+            await _write_action(db, job_id, batch_id, row_id,
+                                  "DriverEquipmentAssignment", "Create",
+                                  assign_eq["id"], None, assign_eq,
+                                  "Applied", eq_key, actor,
+                                  f"matched by {eq_fk.matched_by}")
+    elif eq_fk.status == "multiple":
+        await _write_action(db, job_id, batch_id, row_id,
+                              "DriverEquipmentAssignment", "Skip", None, None,
+                              {"candidates": eq_fk.candidates,
+                                "matched_by": eq_fk.matched_by},
+                              "Skipped",
+                              f"driver-equipment-multi:{drv_id}:{row_id}",
+                              actor, "multiple Equipment matches - blocking")
+    # If equipment_number was provided but unresolved, log a blocking skip
+    elif str(transformed.get("equipment_number") or transformed.get("equipment_id") or "").strip():
+        await _write_action(db, job_id, batch_id, row_id,
+                              "DriverEquipmentAssignment", "Skip", None, None,
+                              transformed, "Skipped",
+                              f"driver-equipment-unresolved:{drv_id}:{row_id}",
+                              actor, "unresolved Equipment reference")
     return await _write_action(db, job_id, batch_id, row_id, "Driver", "Create",
                                  drv_id, None, driver_doc, "Applied", key, actor)
+
+
+async def _handle_driver_equipment_assignment(db, job_id: str, batch_id: str,
+                                                    row_id: str, row: dict,
+                                                    package_id: str, actor: str,
+                                                    dry_run_mode: bool) -> dict:
+    """Assignment-row handler when the source row directly represents a
+    Driver-Equipment assignment (rather than being embedded in a Driver row).
+    Uses the deterministic Equipment FK resolver.
+    """
+    transformed = row.get("transformed_snapshot") or {}
+    driver_code = str(transformed.get("driver_code") or "").strip()
+    driver = await db["drivers"].find_one({"driver_code": driver_code}, {"_id": 0}) if driver_code else None
+    if not driver:
+        return await _write_action(db, job_id, batch_id, row_id,
+                                     "DriverEquipmentAssignment", "Skip",
+                                     None, None, transformed, "Skipped",
+                                     f"drv-eq-nodriver:{row_id}", actor,
+                                     "driver not resolved")
+    eq_fk = await _resolve_equipment_fk(db, transformed)
+    if eq_fk.status == "unresolved":
+        return await _write_action(db, job_id, batch_id, row_id,
+                                     "DriverEquipmentAssignment", "Skip",
+                                     None, None, transformed, "Skipped",
+                                     f"drv-eq-noeq:{row_id}", actor,
+                                     "equipment not resolved - blocking")
+    if eq_fk.status == "multiple":
+        return await _write_action(db, job_id, batch_id, row_id,
+                                     "DriverEquipmentAssignment", "Skip",
+                                     None, None,
+                                     {"candidates": eq_fk.candidates,
+                                       "matched_by": eq_fk.matched_by},
+                                     "Skipped",
+                                     f"drv-eq-multi:{row_id}", actor,
+                                     "multiple Equipment matches - blocking")
+    key = f"driver-equipment:{driver['id']}:{eq_fk.equipment_id}"
+    already = await db[ACTIONS_COLL].find_one(
+        {"commit_action_key": key, "migration_commit_job_id": job_id,
+          "state": {"$in": ["Applied", "Verified"]}}, {"_id": 0})
+    if already:
+        return already
+    # Duplicate active assignment prevention (EB-03 rule)
+    dup = await db["driver_equipment_assignments"].find_one(
+        {"driver_id": driver["id"], "equipment_id": eq_fk.equipment_id,
+          "is_current": True, "is_archived": {"$ne": True}}, {"_id": 0})
+    if dup:
+        return await _write_action(db, job_id, batch_id, row_id,
+                                     "DriverEquipmentAssignment", "Preserve",
+                                     dup["id"], dup, dup, "Applied", key, actor,
+                                     "existing current assignment preserved")
+    if dry_run_mode:
+        return await _write_action(db, job_id, batch_id, row_id,
+                                     "DriverEquipmentAssignment", "Create",
+                                     None, None,
+                                     {"driver_id": driver["id"],
+                                       "equipment_id": eq_fk.equipment_id,
+                                       "matched_by": eq_fk.matched_by},
+                                     "Skipped", key, actor,
+                                     "rehearsal: no write")
+    is_historical = bool(transformed.get("effective_to"))
+    assign = {"id": _uuid(), "driver_id": driver["id"],
+                "equipment_id": eq_fk.equipment_id,
+                "is_current": not is_historical,
+                "is_primary": True,
+                "effective_from": transformed.get("effective_from") or _iso(),
+                "effective_to": transformed.get("effective_to"),
+                "is_archived": is_historical,
+                "match_evidence": {"matched_by": eq_fk.matched_by},
+                "assignment_source": "migration-commit",
+                "created_at": _iso(), "created_by": actor,
+                "_source": "migration-commit"}
+    await db["driver_equipment_assignments"].insert_one(assign)
+    await _write_rollback_action(db, package_id, 7,
+                                    "DriverEquipmentAssignment",
+                                    assign["id"], "Delete", None, assign)
+    return await _write_action(db, job_id, batch_id, row_id,
+                                 "DriverEquipmentAssignment", "Create",
+                                 assign["id"], None, assign,
+                                 "Applied", key, actor,
+                                 f"matched by {eq_fk.matched_by}")
 
 
 ENTITY_HANDLERS = {
@@ -582,6 +776,7 @@ ENTITY_HANDLERS = {
     "Vehicle": _handle_vehicle,
     "Equipment": _handle_equipment,
     "Driver": _handle_driver,
+    "DriverEquipmentAssignment": _handle_driver_equipment_assignment,
 }
 
 

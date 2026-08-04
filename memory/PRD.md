@@ -1093,3 +1093,95 @@ credentials, no real messages sent.
 - `automation_health_snapshots` history endpoint not built.
 - Real ACE data migration remains scheduled for EB-16 / Phase 3.
 
+
+---
+
+## EB-16 · Controlled Migration Rehearsal, Operational Dashboards & Integrity Gate (2026-02-04)
+
+**Status**: ✅ Delivered. Backend `538 passed, 4 skipped, 0 failed`.
+Frontend QA `100% PASS` across 7 new pages. `main` untouched, no
+deploy, no GitHub push, no real ACE data, all providers mocked or in
+Development Outbox.
+
+### New backend module
+- `backend/integrity_module.py` (~1150 lines) — Integrity engine +
+  Operations service + Rehearsal fixtures + Webhooks + Release Gate.
+
+### New backend tests
+- `backend/tests/test_integrity_eb16.py` — 23 targeted tests covering
+  every requirement class.
+
+### New collections & indexes
+- `integrity_check_definitions` (unique on `integrity_check_definition_id`
+  and `rule_key`)
+- `integrity_check_runs` (unique on `integrity_check_run_id`,
+  index on `(run_type, created_at DESC)`)
+- `integrity_check_findings` (unique on `integrity_check_finding_id`,
+  index on `(rule_key, signature)`, index on `status`)
+- `integrity_check_events` (sparse unique on `integrity_check_event_id`)
+- `integrity_baselines` (sparse unique on `integrity_baseline_id`)
+- `automation_health_snapshots` (index on `captured_at DESC`) —
+  materialised
+- `notification_provider_events` — reused for webhook events
+
+### New backend routes
+- Integrity: `GET /api/integrity/definitions`, `POST /api/integrity/runs`,
+  `GET /api/integrity/runs`, `GET /api/integrity/runs/{run_id}`,
+  `GET /api/integrity/runs/{run_id}/findings`,
+  `POST /api/integrity/findings/{finding_id}/acknowledge|resolve|accept-risk|reopen`,
+  `GET /api/integrity/release-gate`.
+- Operations: `GET /api/operations/summary`, `/driver-readiness`,
+  `/compliance-workload`, `/migration-readiness`.
+- Escalation reopen: `POST /api/automation/escalation-incidents/{id}/reopen`.
+- Automation health: `POST /api/automation/health-snapshots`,
+  `GET /api/automation/health-snapshots`.
+- Webhooks: `POST /api/webhooks/sendgrid`, `POST /api/webhooks/twilio`
+  (default-disabled, signature-verified).
+- Rehearsal: `POST /api/rehearsal/eb16/seed` (Admin).
+
+### New frontend pages / routes
+- `/operations` → `OperationsDashboard.jsx`
+- `/operations/driver-readiness` → `DriverReadinessPage.jsx`
+- `/operations/compliance-workload` → `ComplianceWorkloadPage.jsx`
+- `/operations/migration-readiness` → `MigrationReadinessPage.jsx`
+- `/administration/automation/incidents` → `AutomationIncidentsPage.jsx`
+- `/administration/integrity` → `IntegrityAdminPage.jsx`
+- Health history section added to `AutomationHub.jsx`
+- Hub tiles: `operations-hub-card`, `integrity-hub-card`
+
+### Files changed
+- `backend/server.py` — wired `build_integrity_router` and index
+  bootstrap.
+- `frontend/src/App.js` — 7 new routes + 7 new imports.
+- `frontend/src/pages/Hub.jsx` — 2 new tiles.
+- `frontend/src/pages/AutomationHub.jsx` — expanded nav (5 cards) +
+  Health History section with accessible bar chart & summary table.
+- `README.md`, `VERSION` — updated to `dcc-phase2-eb16`.
+
+### Documentation added
+- `memory/EB-16-INTEGRITY-TECHNICAL-NOTE.md`
+- `memory/EB-16-MIGRATION-REHEARSAL-RUNBOOK.md`
+- `memory/EB-16-OPERATIONS-RUNBOOK.md`
+- `memory/EB-16-RELEASE-GATE-RUNBOOK.md`
+
+### Defects found and fixed during EB-16
+1. Rehearsal seed hit a `DuplicateKeyError` on
+   `notification_delivery_attempts` because the cleanup loop did not
+   include that collection. Fix: added to the sweep list; seed is now
+   fully idempotent.
+2. `TestEscalationReopen` used a static `eb16-inc-1` id; a leftover
+   row from a prior run caused a `DuplicateKeyError`. Fix: generate a
+   unique id per test and clean up explicitly.
+
+### Constraints honoured
+- ❌ No real ACE data — all fixtures tagged `_source="seed-eb16"`.
+- ❌ No live messages — Development Outbox default.
+- ❌ Webhooks disabled by default (`WEBHOOKS_ENABLED=false`) — return
+  503 on POST.
+- ❌ No SDKs added — Twilio uses HMAC-SHA1 via `hmac`; SendGrid uses
+  HMAC-SHA256 via `hmac`.
+- ❌ No permanent in-process cron loop.
+- ❌ No real credentials in `.env`, source, or docs.
+- ❌ No deploy, no GitHub push, `main` untouched.
+- ✅ Development Outbox default.
+

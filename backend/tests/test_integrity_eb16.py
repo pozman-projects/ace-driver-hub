@@ -326,24 +326,35 @@ class TestWebhooks:
 class TestEscalationReopen:
     def test_reopen_endpoint(self, admin_headers):
         # Seed an incident row
+        inc_id = f"eb16-inc-{uuid.uuid4().hex[:8]}"
         async def _do():
             db = _mongo()
             try:
+                await db["notification_escalation_incidents"].delete_many(
+                    {"notification_escalation_incident_id": inc_id})
                 await db["notification_escalation_incidents"].insert_one({
-                    "notification_escalation_incident_id": "eb16-inc-1",
+                    "notification_escalation_incident_id": inc_id,
                     "rule_key": "compliance_expired",
                     "source_entity": "equipment_compliance",
-                    "source_id": "eb16-src-1",
+                    "source_id": f"eb16-src-{uuid.uuid4().hex[:8]}",
                     "active": False, "resolved_at": "2026-01-01T00:00:00+00:00",
                     "current_level": 1, "_source": "seed-eb16",
                 })
             finally: db.client.close()
         asyncio.run(_do())
         r = requests.post(
-            f"{API}/automation/escalation-incidents/eb16-inc-1/reopen",
+            f"{API}/automation/escalation-incidents/{inc_id}/reopen",
             headers=admin_headers)
         assert r.status_code == 200
         assert r.json()["reopened"] is True
+        # Teardown
+        async def _rm():
+            db = _mongo()
+            try:
+                await db["notification_escalation_incidents"].delete_many(
+                    {"notification_escalation_incident_id": inc_id})
+            finally: db.client.close()
+        asyncio.run(_rm())
 
 
 # ─────────────────────────────────────────────────────────────────────

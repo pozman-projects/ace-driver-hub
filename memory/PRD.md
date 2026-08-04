@@ -931,3 +931,165 @@ validated by testing agent. `main` untouched, no deploy, no GitHub push.
 - Real ACE spreadsheet data migration (EB-16 / Phase 3).
 - OCR / AI document extraction (P2).
 
+
+---
+
+## EB-15 Close-out · Escalation Dedup, Template Studio & Scheduler Manifests (2026-02-04)
+
+**Status**: ✅ Delivered. Backend suite green (**515 passed, 4 skipped**;
++16 escalation tests, 0 regressions). Frontend Template Studio validated
+(9/9 flows PASS). `main` untouched, no deploy, no GitHub push, no real
+credentials, no real messages sent.
+
+### 1. Escalation deduplication (real, deterministic)
+- New service `EscalationService` in `scheduler_module.py`.
+- **6 rules covered**: `compliance_expired` (equipment_compliance),
+  `activation_blocked` (driver_activation), `override_expired`
+  (driver_activation_override), `migration_failed`
+  (migration_commit_job), `storage_failed` (storage_reconciliation_run),
+  `delivery_repeatedly_failed` (notification_delivery).
+- **Dedup keys**: `rule_key | source_entity | source_id | level |
+  channel | recipient`, SHA-256'd into a stored `idempotency_key`
+  protected by a unique index in `notification_escalations`.
+- **Incident model**: `notification_escalation_incidents` (unique on
+  `rule_key + source_entity + source_id`) tracks
+  `first_seen_at`, `current_level`, `acknowledged_at/_by/_at_level`,
+  `resolved_at/_by`, `active`.
+- **Level progression**: increases only per rule levels — never
+  decreases. New level opens NEW escalation rows without duplicating the
+  earlier level.
+- **Acknowledgement** blocks new escalations at the SAME level; a level
+  increase escapes acknowledgement.
+- **Resolution** (source no longer meets condition OR API-driven) stops
+  further escalation permanently.
+- **Self-recursion guard**: escalation-driven deliveries are tagged
+  `_source="escalation"` and excluded from the
+  `delivery_repeatedly_failed` detector.
+- **New API endpoints (5)**:
+  - `GET  /api/automation/escalation-rules`
+  - `GET  /api/automation/escalation-incidents` (?active, ?rule_key)
+  - `GET  /api/automation/escalation-incidents/{id}`
+  - `POST /api/automation/escalation-incidents/{id}/acknowledge`
+  - `POST /api/automation/escalation-incidents/{id}/resolve`
+
+### 2. Notification Template Studio (frontend)
+- Route `/administration/automation/templates` (new page
+  `AutomationTemplatesPage.jsx`).
+- Added to Automation navigation (`nav-templates` card on the hub).
+- List, create Draft, edit Draft, preview subject+body, plain-text
+  preview, SMS length + segment count, allowed-variable list,
+  missing-variable warning, unknown-variable warning, approve (locks
+  editing), clone (bumps version, returns Draft), archive.
+- Approved templates show `approved-lock-badge` and disable subject/body
+  inputs and the save button.
+- HTML sanitiser strips `<script>`, `<iframe>`, event handlers —
+  verified in preview end-to-end.
+- **New backend endpoint**: `POST /api/automation/notification-templates/preview`
+  returns `{subject, body_text, body_html_sanitised,
+  allowed_variables, missing_variables, unknown_variables, sms_length,
+  sms_segments, channel}`.
+
+### 3. Actual scheduler deployment files
+- `/app/deploy/kubernetes/cronjobs.yaml` — **16 CronJobs + 1 ConfigMap**
+  (17 documents). Every CronJob has:
+  - `concurrencyPolicy: Forbid`, `restartPolicy: Never`, `backoffLimit: 0`
+  - `startingDeadlineSeconds` (120–600) and `activeDeadlineSeconds`
+    (300–3600 depending on category)
+  - `ttlSecondsAfterFinished: 3600`
+  - `timeZone: "Australia/Melbourne"` (with UTC/DST fallback documented
+    in the README for K8s < 1.25)
+  - `SCHEDULER_SERVICE_TOKEN` read via `secretKeyRef` — **no secret
+    values inlined anywhere in the file**
+- `/app/deploy/scheduler/README.md` — rollout, token rotation, DST
+  handling, monitoring alerts, do-not-do list.
+- **Not applied**. `main` untouched, no deploy.
+
+### 4. Verification totals
+- **EB-15 backend tests**: `test_scheduler_eb15.py` — 48 passed.
+- **Escalation & notification tests**: `test_escalation_eb15_closeout.py`
+  — 16 passed.
+- **Full backend suite**: **515 passed, 4 skipped, 0 failed**
+  (runtime ≈ 685s). Baseline before this task was 499 passed, 4 skipped
+  → +16 escalation tests, 0 regressions.
+- **Frontend testing agent (iteration_21.json)**: 9/9 flows PASS at
+  100%. HTML sanitiser confirmed. Approve→lock UX confirmed.
+  Clone→v2→Draft confirmed. RBAC redirect confirmed (with one minor
+  spec-vs-impl note: ReadOnly ultimately lands on `/` because both the
+  Templates page AND the Automation Hub block ReadOnly — this is
+  correct security behaviour).
+- **Lint**: all new/edited files clean (Python & JS).
+
+### Escalation dedup scenarios (proven flat)
+1. Zero triggers → zero created.
+2. Compliance expired: 3 consecutive scans, count flat.
+3. Activation blocked: 3 consecutive scans, count flat.
+4. Override expired: 3 consecutive scans, count flat.
+5. Migration failed: 3 consecutive scans, count flat.
+6. Storage failed: 3 consecutive scans, count flat.
+7. Delivery repeatedly failed: 3 consecutive scans, count flat.
+8. Acknowledgement blocks new escalations at same level.
+9. Resolution stops further escalations.
+10. Level increase produces new rows without duplicating L1.
+11. Idempotency key persisted and unique across all rows.
+12. Escalation-driven deliveries not re-escalated (self-recursion guard).
+
+### Template Studio scenarios (verified by frontend testing agent)
+1. List renders 32+ cards from real DB.
+2. Create Draft via modal (`new-template-*` fields).
+3. Preview shows subject, body, SMS length/segments, missing/unknown
+   variables, allowed variables list.
+4. Approve locks editing (`approved-lock-badge`, disabled inputs,
+   hidden save button).
+5. Clone creates Draft v2.
+6. Archive removes card from list after refresh.
+7. HTML sanitiser strips `<script>` from `body_html`.
+8. ReadOnly redirect (RBAC enforced).
+9. `nav-templates` card exists on Automation Hub.
+
+### Files added / changed (this task)
+- `backend/scheduler_module.py` — `EscalationService`, 6 detectors, 3
+  incident-lifecycle methods, `PreviewRequest`, preview endpoint, 5
+  escalation endpoints, 2 new collections + indexes (~450 lines added).
+- `backend/tests/test_escalation_eb15_closeout.py` — 16 deterministic
+  tests (new file, 380 lines).
+- `frontend/src/pages/AutomationTemplatesPage.jsx` — new page (~380
+  lines).
+- `frontend/src/pages/AutomationHub.jsx` — added `nav-templates` card
+  and expanded grid to 4 columns.
+- `frontend/src/App.js` — new route + import.
+- `deploy/kubernetes/cronjobs.yaml` — 16 CronJobs + ConfigMap (new).
+- `deploy/scheduler/README.md` — rollout & rotation runbook (new).
+- `memory/PRD.md` — this section.
+
+### Defects found and fixed
+1. **FastAPI mistook `PreviewRequest` for a query parameter** because
+   the Pydantic model was defined inside the router-builder function.
+   Fix: hoisted `PreviewRequest` to module scope.
+2. **Startup failure on new escalation collection index** — pre-existing
+   `notification_escalations` rows (from EB-15 initial placeholder)
+   lacked the new `notification_escalation_id` field, so `unique=True`
+   index build hit `E11000 dup key null`. Fix: dropped the placeholder
+   collection once; index builds cleanly.
+3. **React hook order violation** in `AutomationTemplatesPage.jsx` —
+   `<Navigate>` early-return sat before `useMemo`. Fix: moved the
+   redirect below all hook calls.
+
+### Constraints honoured
+- ❌ No SendGrid/Twilio SDKs added.
+- ❌ No permanent in-process cron loop.
+- ❌ No live network calls in tests.
+- ❌ No real credentials in `.env`, YAML, or any source file.
+- ❌ No real ACE data, no deploy, no GitHub push.
+- ✅ Development Outbox default (all 25 escalation-driven deliveries
+  from the test seeds went to the outbox — **zero real messages sent**).
+- ✅ Scheduler manifests are UNAPPLIED.
+
+### Remaining limitations
+- Escalation UI is API-only in this round (Automation Hub shows
+  aggregate counts; a dedicated Incidents page is a future
+  enhancement).
+- No webhook receivers yet for SendGrid/Twilio status callbacks.
+- Automation health snapshots collection still reserved (unused).
+- `automation_health_snapshots` history endpoint not built.
+- Real ACE data migration remains scheduled for EB-16 / Phase 3.
+

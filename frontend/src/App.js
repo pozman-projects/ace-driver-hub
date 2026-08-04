@@ -28,6 +28,7 @@ import MigrationPreparationHub from "./pages/MigrationPreparationHub";
 import MigrationWorkbooksPage from "./pages/MigrationWorkbooksPage";
 import MigrationMappingsPage from "./pages/MigrationMappingsPage";
 import MigrationDryRunsPage from "./pages/MigrationDryRunsPage";
+import StorageAdmin from "./pages/StorageAdmin";
 import MigrationDryRunDetailPage from "./pages/MigrationDryRunDetailPage";
 
 function App() {
@@ -134,6 +135,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <NumberingAdmin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/storage"
+              element={
+                <ProtectedRoute>
+                  <StorageAdmin />
                 </ProtectedRoute>
               }
             />

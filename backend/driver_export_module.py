@@ -762,6 +762,28 @@ class ExportService:
                 "created_by": actor,
             })
 
+            # EB-13 · Register export in the private storage service.
+            storage_object_id_ref = None
+            try:
+                from storage_module import get_storage_service
+                svc = get_storage_service(self.db)
+                _obj = await svc.register_existing(
+                    object_key=storage_key, sha256=checksum,
+                    file_size=file_size, content_type="application/pdf",
+                    filename=safe_name, entity_type="Driver",
+                    entity_id=driver_id, actor_email=actor,
+                    document_id=document_id,
+                    retention_class="Generated Export")
+                storage_object_id_ref = _obj["storage_object_id"]
+                await self.db[DOCUMENT_VERSIONS_COLL].update_one(
+                    {"id": version_id},
+                    {"$set": {"storage_object_id": storage_object_id_ref}})
+                await self.db[DOCUMENTS_COLL].update_one(
+                    {"id": document_id},
+                    {"$set": {"storage_object_id": storage_object_id_ref}})
+            except Exception:  # noqa: BLE001
+                pass
+
             # ---- driver_export_versions row ----
             dev_id = _uuid()
             version_row = {

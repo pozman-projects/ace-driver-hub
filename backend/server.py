@@ -539,6 +539,10 @@ async def on_startup():
     from migration_prep_module import ensure_indexes as mp_ensure_indexes, seed_transform_rules as mp_seed_rules
     await mp_ensure_indexes(db)
     await mp_seed_rules(db)
+    # --- EB-13 Private Object Storage ---
+    from storage_module import ensure_indexes as st_ensure_indexes, seed_retention_policies as st_seed_policies
+    await st_ensure_indexes(db)
+    await st_seed_policies(db)
 
 
 # Include router and CORS
@@ -587,6 +591,10 @@ app.include_router(build_driver_export_router(db, get_current_user))
 # --- EB-12 Migration Preparation ---
 from migration_prep_module import build_migration_prep_router  # noqa: E402
 app.include_router(build_migration_prep_router(db, get_current_user))
+
+# --- EB-13 Private Object Storage ---
+from storage_module import build_storage_router  # noqa: E402
+app.include_router(build_storage_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

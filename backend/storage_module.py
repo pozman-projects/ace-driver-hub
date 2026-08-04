@@ -537,6 +537,66 @@ class StorageService:
             "payload": payload or {}, "created_at": _iso(),
         })
 
+    async def register_existing(self, *, object_key: str, sha256: str,
+                                  file_size: int, content_type: str,
+                                  filename: str, entity_type: Optional[str],
+                                  entity_id: Optional[str], actor_email: str,
+                                  document_id: Optional[str] = None,
+                                  export_version_id: Optional[str] = None,
+                                  retention_class: str = "Operational Document",
+                                  provider_override: Optional[str] = None) -> dict:
+        """Register metadata for a file that has ALREADY been written to the
+        adapter's backing store (e.g. by EB-05 documents or EB-11 exports).
+        Does NOT re-write bytes. Used to give existing modules first-class
+        visibility inside the EB-13 storage administration surface.
+        """
+        obj_id = _uuid()
+        version_id = _uuid()
+        now = _iso()
+        provider = provider_override or self.adapter.provider
+        obj = {
+            "storage_object_id": obj_id,
+            "provider": provider,
+            "bucket": getattr(self.adapter, "bucket", None),
+            "object_key": object_key,
+            "entity_type": entity_type, "entity_id": entity_id,
+            "document_id": document_id,
+            "migration_workbook_id": None,
+            "export_version_id": export_version_id,
+            "current_version_id": version_id,
+            "status": "Available",
+            "content_type": content_type or "application/octet-stream",
+            "original_file_name": (filename or "")[:200],
+            "file_extension": (filename.rsplit(".", 1)[-1].lower() if "." in filename else ""),
+            "file_size": file_size, "sha256": sha256,
+            "encryption_status": "AES256" if provider == "s3" else "TLS/at-rest-N/A",
+            "retention_class": retention_class,
+            "malware_scan_status": "Not Scanned",
+            "created_at": now, "updated_at": now,
+            "created_by": actor_email, "updated_by": actor_email,
+            "is_archived": False, "_source": "register-existing",
+        }
+        version = {
+            "storage_object_version_id": version_id,
+            "storage_object_id": obj_id,
+            "provider_version_id": None,
+            "object_key": object_key, "version_number": 1,
+            "content_type": obj["content_type"],
+            "file_size": file_size, "sha256": sha256,
+            "etag": (sha256 or "")[:16],
+            "uploaded_at": now, "uploaded_by": actor_email,
+            "verified_at": now, "verification_status": "Verified",
+            "archive_status": "Active", "retention_until": None,
+            "created_at": now, "is_archived": False,
+        }
+        await self.db[OBJ_COLL].insert_one(obj)
+        await self.db[OBJVER_COLL].insert_one(version)
+        await self._event(obj_id, version_id, entity_type, entity_id,
+                           "Upload Completed", actor_email, _uuid(),
+                           {"sha256": sha256, "size": file_size,
+                            "source": "register-existing"})
+        return _strip(obj)
+
     async def reconcile(self, actor_email: str, run_type: str = "Full") -> dict:
         run_id = _uuid()
         now = _iso()

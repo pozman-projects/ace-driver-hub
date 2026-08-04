@@ -581,6 +581,29 @@ def build_migration_prep_router(db, get_current_user):
 
         wb_id = _uuid()
         checksum = _sha256(data)
+        # EB-13 · Route new workbook bytes through the private storage service
+        # rather than persisting them into MongoDB. Legacy workbooks with
+        # `_data` remain readable via the same reader helper.
+        storage_object_id = None
+        try:
+            from storage_module import get_storage_service
+            svc = get_storage_service(db)
+            obj = await svc.put(
+                entity_type=None, entity_id=None,
+                filename=safe_name, content=data,
+                content_type=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                if file_type == "xlsx" else "text/csv"),
+                actor_email=current.get("email") or "system",
+                migration_workbook_id=wb_id,
+                retention_class="Migration Source",
+                validate=False,
+            )
+            storage_object_id = obj["storage_object_id"]
+        except Exception as _e:  # noqa: BLE001
+            # If storage service fails we surface a clear error - never silently
+            # fall back to inline Mongo bytes for new uploads.
+            raise HTTPException(status_code=500,
+                                 detail=f"Storage persistence failed: {type(_e).__name__}")
         wb = {
             "migration_source_workbook_id": wb_id,
             "profile_name": profile_name, "display_name": display_name or profile_name,
@@ -593,7 +616,8 @@ def build_migration_prep_router(db, get_current_user):
             "uploaded_at": _iso(), "last_profiled_at": _iso(),
             "status": "Profiled" if sheets else "Validation Failed",
             "notes": "", "created_at": _iso(), "updated_at": _iso(),
-            "_source": "runtime", "_data": data,  # raw bytes cached for later reads
+            "_source": "runtime",
+            "storage_object_id": storage_object_id,
         }
         await db[WB_COLL].insert_one(wb)
         for s in sheets:
@@ -914,7 +938,19 @@ def build_migration_prep_router(db, get_current_user):
                 wb = await db[WB_COLL].find_one({"migration_source_workbook_id": profile["migration_source_workbook_id"]})
                 if not wb:
                     continue
-                data = wb.get("_data")
+                # EB-13 · Prefer object storage, fall back to legacy inline bytes
+                data = None
+                if wb.get("storage_object_id"):
+                    try:
+                        from storage_module import get_storage_service
+                        svc = get_storage_service(db)
+                        data = await svc.get_bytes(wb["storage_object_id"],
+                                                     actor_email="system-migration",
+                                                     mode="download")
+                    except Exception:  # noqa: BLE001
+                        data = None
+                if data is None:
+                    data = wb.get("_data")
                 if not data:
                     continue
                 sheet = None

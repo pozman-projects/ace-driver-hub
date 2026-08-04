@@ -696,6 +696,26 @@ def build_documents_router(db, get_current_user):
         }
         await db[DOCUMENTS_COLL].insert_one(doc)
         doc.pop("_id", None)
+        # EB-13 · Register the newly-persisted document in the private storage
+        # service so it appears in the storage administration surface.
+        try:
+            from storage_module import get_storage_service
+            svc = get_storage_service(db)
+            _obj = await svc.register_existing(
+                object_key=meta["storage_key"], sha256=meta["checksum_sha256"],
+                file_size=meta["file_size_bytes"], content_type=meta["mime_type"],
+                filename=meta["original_filename"], entity_type=entity_type,
+                entity_id=entity_id, actor_email=current.get("email") or "system",
+                document_id=doc_id, retention_class="Operational Document")
+            await db[DOCUMENT_VERSIONS_COLL].update_one(
+                {"id": version_id},
+                {"$set": {"storage_object_id": _obj["storage_object_id"]}})
+            await db[DOCUMENTS_COLL].update_one(
+                {"id": doc_id},
+                {"$set": {"storage_object_id": _obj["storage_object_id"]}})
+        except Exception:  # noqa: BLE001
+            # Registration is additive - never fail the upload if tracking fails.
+            pass
         # Optional link
         if entity_type and entity_id:
             rel = relationship_type or LinkRelationship.Evidence.value

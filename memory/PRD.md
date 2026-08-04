@@ -626,3 +626,87 @@ buttons + warning banner), `frontend/src/App.js` (two new routes).
 - Production scheduler (Kubernetes CronJob) driving reconciliation +
   notifications on a real cadence.
 
+
+### Phase 2 · EB-14 Stage A Controlled Migration Commit, Rollback & Legacy Backfill (2026-08-04)
+- **NEW backend module** `backend/migration_commit_module.py` (~1350 lines)
+  containing `ApprovalService`, `CommitService` with entity handlers for
+  Owner / Vehicle / Equipment / Driver, cross-sheet FK resolution
+  (ABN / VIN / registration), `RollbackService`, `PostCommitReconciliationService`
+  and `StorageBackfillService`. Every action carries a stable
+  `commit_action_key` and every canonical write registers a reverse
+  step in the rollback package BEFORE the write happens.
+- **11 new UUID-keyed MongoDB collections** with 20 indexes:
+  `migration_commit_jobs`, `migration_commit_batches`, `migration_commit_rows`,
+  `migration_commit_actions` (append-only), `migration_commit_events`
+  (append-only), `migration_rollback_packages`, `migration_rollback_actions`
+  (append-only), `migration_post_commit_reconciliation` (append-only),
+  `migration_approvals`, `storage_backfill_jobs`, `storage_backfill_actions`.
+- **30 new API routes** at `/api/migration-commit/*` and `/api/storage/backfill*`:
+  create/list/get commit jobs, preflight, request-approval, approve, reject,
+  execute, pause, resume, retry, archive, batches, actions, events,
+  rollback-package, rollback/{request|approve|execute|status}, reconcile,
+  reconciliation-list; backfill create/list/get/execute/retry.
+- **Safety rails** (backend-first, mirrored on UI): immutable migration
+  package with package_sha256, preflight validates approval + Go-No-Go +
+  mapping-profile version + workbook checksum + storage health + no
+  reserved dispatch 0/13 + rollback package present. NO-GO blocked from
+  creating a commit job. Manager creates Rehearsal jobs; only Admin can
+  execute Controlled Commit. Self-approval blocked. Conditional Go
+  requires explicit risk_acceptance. Rollback requires separate Admin
+  approval + typed 'ROLL BACK MIGRATION' confirmation. Controlled Commit
+  requires typed 'COMMIT ACE MIGRATION' confirmation. Every action is
+  idempotent (stable commit_action_key). Environment banner truthfully
+  reports staged-idempotent mode; MIGRATION_COMMIT_TRANSACTIONS=true is
+  a future Production flag not active here.
+- **Cross-sheet FK resolution**: Driver→Owner by ABN + canonical ID,
+  Driver→Vehicle by VIN then registration+state.
+- **Legacy Storage Backfill** with scopes Documents, Exports,
+  Migration Workbooks, All Legacy Development Assets. Copy first,
+  verify by reading bytes back, only then update canonical
+  storage_object_id. Legacy source is always retained. Idempotent rerun.
+- **Frontend**: `/migration-commit` (`MigrationCommitHub.jsx`, ~605 lines)
+  with truthful env banner, permanent commit warning, Commit Jobs table
+  + Create Job modal (NO-GO excluded from select), Job detail panel
+  (immutable-package summary, action buttons, preflight grid, progress
+  tiles, reconciliation history, rollback package status, event log),
+  typed confirmation modals for Controlled Commit and Rollback,
+  Legacy Storage Backfill section with 'Source retained: Yes' column.
+- **Backend tests**: 23 passed, 1 conditional skip in
+  `tests/test_migration_commit_eb14.py`.
+- **Frontend testing_agent_v3_fork iteration_18**: 100% of Stage A
+  acceptance criteria PASS. Two nice-to-have UX improvements applied
+  (Controlled-Commit button now hidden unless job status permits;
+  eligible dry-run list filtering already excludes NO-GO).
+- **Backend suite total**: **441 passed, 5 skipped, 0 failed** in 463.54s
+  (up from 418; +23 EB-14 tests + 1 new conditional skip).
+- **Files added (6)**:
+  - `backend/migration_commit_module.py`
+  - `backend/tests/test_migration_commit_eb14.py`
+  - `frontend/src/pages/MigrationCommitHub.jsx`
+  - `memory/EB-14-MIGRATION-COMMIT-TECHNICAL-NOTE.md`
+  - `memory/EB-14-REAL-DATA-RUNBOOK.md`
+  - `memory/EB-14-ROLLBACK-RUNBOOK.md`
+- **Files changed (3)**:
+  - `backend/server.py` — EB-14 startup + router wiring
+  - `frontend/src/App.js` — new `/migration-commit` route
+  - `frontend/src/pages/Hub.jsx` — new `migration-commit-card`
+- `/app/VERSION` → `dcc-phase2-eb14`.
+- **Sign-off confirmations**:
+  - ✅ Only fictional sanitised fixtures were used. No real ACE names,
+    ABNs, VINs, licence numbers, phones or emails.
+  - ✅ Rehearsal mode never creates canonical DCC records (verified).
+  - ✅ Controlled Commit requires Admin + valid approval + successful
+    preflight + typed confirmation.
+  - ✅ Self-approval blocked for Controlled Commit.
+  - ✅ NO-GO dry runs cannot create commit jobs.
+  - ✅ Rollback requires separate Admin approval + typed confirmation.
+  - ✅ Legacy source files retained by backfill.
+  - ✅ No `main` push. No GitHub push. No deploy.
+  - ✅ No real email / SMS / Blink / OCR / AI activated.
+- **Remaining limitations (EB-15 scope)**:
+  - Multi-document MongoDB transactions require replica-set at deploy.
+    Currently staged-idempotent only.
+  - Cross-sheet Equipment FK + full name-normalisation matcher.
+  - Malware scan, real email/SMS, Blink integration, OCR, AI extraction
+    remain out of scope.
+

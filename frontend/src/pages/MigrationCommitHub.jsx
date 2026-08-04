@@ -326,7 +326,7 @@ export default function MigrationCommitHub() {
                       <Play weight="fill" className="inline mr-1" /> Execute rehearsal
                     </button>
                   )}
-                  {detail.mode === "Controlled Commit" && canAdmin && (
+                  {detail.mode === "Controlled Commit" && canAdmin && ["Approved", "Ready to Commit", "Paused"].includes(detail.status) && (
                     <button data-testid="commit-execute-controlled" onClick={() => setConfirmCommit("")} disabled={busy === "Execute"}
                             className="px-3 py-2 rounded-lg text-sm border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50">
                       <Warning weight="fill" className="inline mr-1" /> Execute Controlled Commit

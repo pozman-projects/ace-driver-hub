@@ -878,6 +878,23 @@ class NotificationsEngine:
                                     or event["entity_id"]})
         now = _iso()
         for r in resolved:
+            # EB-13 hardening · Dedup by stable recipient identity, NOT the
+            # freshly generated recipient_id. Previously the dedup check
+            # matched on a brand-new UUID and never hit, so every scan
+            # re-created recipient + delivery rows and the collection grew
+            # without bound - triggering timeouts on subsequent scans.
+            identity: Dict[str, Any] = {
+                "notification_id": notification["notification_id"],
+                "channel": r["channel"],
+            }
+            for stable_key in ("user_id", "driver_id", "owner_id",
+                                "email_address", "mobile_number"):
+                if r.get(stable_key):
+                    identity[stable_key] = r[stable_key]
+                    break
+            existing = await self.db[DELIVERIES_COLL].find_one(identity, {"_id": 0})
+            if existing:
+                continue
             rec_id = _uuid()
             rec_doc = {
                 "notification_recipient_id": rec_id,
@@ -889,15 +906,6 @@ class NotificationsEngine:
                 "is_archived": False,
             }
             await self.db[RECIPIENTS_COLL].insert_one(rec_doc)
-            # Skip if a delivery for this notification+recipient+channel already exists
-            already = await self.db[DELIVERIES_COLL].find_one(
-                {"notification_id": notification["notification_id"],
-                 "notification_recipient_id": rec_id,
-                 "channel": r["channel"]},
-                {"_id": 0},
-            )
-            if already:
-                continue
             provider = "in-app" if r["channel"] == Channel.InApp.value else "simulated"
             if r["channel"] == Channel.InApp.value:
                 status_ = DeliveryStatus.Sent.value
@@ -918,6 +926,11 @@ class NotificationsEngine:
                 "notification_delivery_id": _uuid(),
                 "notification_id": notification["notification_id"],
                 "notification_recipient_id": rec_id,
+                # EB-13 hardening · duplicate stable identity keys on the
+                # delivery row itself so dedup lookups are index-friendly
+                # and never depend on a recipient_id join.
+                **{k: r.get(k) for k in ("user_id", "driver_id", "owner_id",
+                                          "email_address", "mobile_number")},
                 "channel": r["channel"],
                 "provider": provider,
                 "provider_message_id": None,
@@ -1502,6 +1515,12 @@ async def ensure_indexes(db) -> None:
     await db[DELIVERIES_COLL].create_index("notification_delivery_id", unique=True, sparse=True)
     await db[DELIVERIES_COLL].create_index("notification_id")
     await db[DELIVERIES_COLL].create_index("delivery_status")
+    # EB-13 hardening · dedup lookup keys used by _materialise_deliveries.
+    await db[DELIVERIES_COLL].create_index([("notification_id", 1), ("channel", 1), ("user_id", 1)])
+    await db[DELIVERIES_COLL].create_index([("notification_id", 1), ("channel", 1), ("driver_id", 1)])
+    await db[DELIVERIES_COLL].create_index([("notification_id", 1), ("channel", 1), ("owner_id", 1)])
+    await db[DELIVERIES_COLL].create_index([("notification_id", 1), ("channel", 1), ("email_address", 1)])
+    await db[DELIVERIES_COLL].create_index([("notification_id", 1), ("channel", 1), ("mobile_number", 1)])
     await db[RECIPIENTS_COLL].create_index("notification_recipient_id", unique=True, sparse=True)
     await db[RECIPIENTS_COLL].create_index("notification_id")
     await db[ACKS_COLL].create_index("acknowledgement_id", unique=True, sparse=True)

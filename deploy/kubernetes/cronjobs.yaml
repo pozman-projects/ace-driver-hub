@@ -1,0 +1,612 @@
+# DCC Automation · Kubernetes CronJob manifests
+#
+# ⚠️  UNAPPLIED — reference only.
+# These manifests trigger the DCC scheduler via an authenticated internal
+# endpoint. The DCC pod does NOT run an in-process cron loop; periodic
+# execution is enforced entirely by these CronJobs.
+#
+# All secret values (e.g. `SCHEDULER_SERVICE_TOKEN`) live in the
+# `dcc-scheduler-service-token` Kubernetes Secret and are referenced by
+# secretKeyRef. No secret values are embedded in this file.
+#
+# Timezone note:
+#   Kubernetes ≥ 1.25 honours `spec.timeZone` (Australia/Melbourne). For
+#   clusters below that or where TZ handling is centralised, remove
+#   `timeZone:` and convert each schedule to UTC. DST transitions in
+#   Melbourne shift by ±1h twice a year; UTC schedules are DST-safe but
+#   drift against local business hours. The K8s docs recommend using
+#   `timeZone` on ≥ 1.25 clusters; otherwise the operator MUST bake DST
+#   awareness into the alerting layer.
+#
+# See /app/deploy/scheduler/README.md for rollout & rotation instructions.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dcc-scheduler-endpoint
+  namespace: dcc
+data:
+  API_BASE_URL: "https://dcc.internal"
+---
+# --- Notifications ---------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-notifications-dispatch
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: notifications }
+spec:
+  schedule: "*/5 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/notifications.dispatch"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-notifications-retry
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: notifications }
+spec:
+  schedule: "*/10 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/notifications.retry"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-notifications-dead-letter
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: notifications }
+spec:
+  schedule: "0 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/notifications.dead_letter"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-notifications-escalation
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: notifications }
+spec:
+  schedule: "*/15 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/notifications.escalation"
+---
+# --- Compliance ------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-compliance-scan
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: compliance }
+spec:
+  schedule: "0 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/compliance.scan"
+---
+# --- Numbering -------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-numbering-reservation-expiry
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: numbering }
+spec:
+  schedule: "*/5 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/numbering.reservation_expiry"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-numbering-reconciliation
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: numbering }
+spec:
+  schedule: "0 1 * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/numbering.reconciliation"
+---
+# --- Activation ------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-activation-recalculation
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: activation }
+spec:
+  schedule: "0 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/activation.recalculation"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-activation-override-expiry
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: activation }
+spec:
+  schedule: "0 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/activation.override_expiry"
+---
+# --- Storage ---------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-storage-reconciliation
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: storage }
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/storage/reconciliation"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-storage-checksum-verification
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: storage }
+spec:
+  schedule: "0 3 * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/storage.checksum_verification"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-storage-retention-review
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: storage }
+spec:
+  schedule: "0 4 * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/storage.retention_review"
+---
+# --- Migration -------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-migration-status-reconciliation
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: migration }
+spec:
+  schedule: "0 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/migration.status_reconciliation"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-migration-backfill-reconciliation
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: migration }
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/migration.backfill_reconciliation"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-migration-stale-approval-expiry
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: migration }
+spec:
+  schedule: "*/30 * * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/migration.stale_approval_expiry"
+---
+# --- Documents -------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dcc-documents-review-reminders
+  namespace: dcc
+  labels: { app: dcc-scheduler, category: documents }
+spec:
+  schedule: "0 9 * * *"
+  timeZone: "Australia/Melbourne"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.4.0
+              env:
+                - name: SCHEDULER_SERVICE_TOKEN
+                  valueFrom: { secretKeyRef: { name: dcc-scheduler-service-token, key: SCHEDULER_SERVICE_TOKEN } }
+                - name: API_BASE_URL
+                  valueFrom: { configMapKeyRef: { name: dcc-scheduler-endpoint, key: API_BASE_URL } }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  curl -sS --fail --show-error --max-time 60 \
+                    -H "X-Scheduler-Token: $SCHEDULER_SERVICE_TOKEN" \
+                    -X POST "$API_BASE_URL/api/internal/scheduler/documents.review_reminders"

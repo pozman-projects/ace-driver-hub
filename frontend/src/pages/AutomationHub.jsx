@@ -100,7 +100,7 @@ export default function AutomationHub() {
               <Metric label="SMS provider" value={status.sms_provider} icon={ShieldCheck} testid="metric-sms" />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <NavCard to="/administration/automation/jobs"
                        title="Scheduled Jobs"
                        desc="Registry, manual runs, enable/disable, event history."
@@ -113,6 +113,10 @@ export default function AutomationHub() {
                        title="Providers & Circuit Breakers"
                        desc="Development, SMTP, SendGrid, Twilio. Health probes & resets."
                        testid="nav-providers" />
+              <NavCard to="/administration/automation/templates"
+                       title="Template Studio"
+                       desc="Create drafts, preview, approve, clone and archive templates."
+                       testid="nav-templates" />
             </div>
 
             <div className="mt-6 text-xs text-slate-500" data-testid="automation-tz-note">

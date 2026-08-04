@@ -35,6 +35,7 @@ import AutomationHub from "./pages/AutomationHub";
 import AutomationJobsPage from "./pages/AutomationJobsPage";
 import AutomationDeliveriesPage from "./pages/AutomationDeliveriesPage";
 import AutomationProvidersPage from "./pages/AutomationProvidersPage";
+import AutomationTemplatesPage from "./pages/AutomationTemplatesPage";
 
 function App() {
   return (
@@ -216,6 +217,7 @@ function App() {
             <Route path="/administration/automation/jobs" element={<ProtectedRoute><AutomationJobsPage /></ProtectedRoute>} />
             <Route path="/administration/automation/deliveries" element={<ProtectedRoute><AutomationDeliveriesPage /></ProtectedRoute>} />
             <Route path="/administration/automation/providers" element={<ProtectedRoute><AutomationProvidersPage /></ProtectedRoute>} />
+            <Route path="/administration/automation/templates" element={<ProtectedRoute><AutomationTemplatesPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster position="top-right" richColors closeButton />

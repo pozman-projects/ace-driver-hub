@@ -55,6 +55,10 @@ PROVIDER_HEALTH_COLL = "notification_provider_health"
 DELIVERIES_COLL = "notification_deliveries"
 NOTIFICATIONS_COLL = "notifications"
 
+# EB-15 · Escalation dedup
+INCIDENTS_COLL = "notification_escalation_incidents"
+ESCALATIONS_COLL = "notification_escalations"
+
 # ── Roles ────────────────────────────────────────────────────────────────────
 ROLE_READONLY = {"ReadOnly", "Allocator", "Compliance", "Manager", "Admin"}
 ROLE_ALLOCATOR = {"Allocator", "Compliance", "Manager", "Admin"}
@@ -612,6 +616,428 @@ class DeliveryService:
         return {"delivery_status": "Resolved"}
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Escalation dedup — deterministic, idempotent
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# An "escalation" is a notification raised because a business condition has
+# been unresolved for too long. Deduplication is enforced by a stable
+# ``idempotency_key`` that composes:
+#
+#     rule_key | source_entity | source_id | level | channel | recipient
+#
+# The corresponding incident (one per ``rule_key`` + ``source_entity`` +
+# ``source_id``) tracks the current level and acknowledged/resolved state.
+# Repeated scanner runs therefore never produce duplicate escalations while
+# an incident sits at the same level, and acknowledgements/resolutions are
+# always respected.
+#
+# Rules covered (Section 1 of EB-15 close-out):
+#   • compliance_expired            (Critical compliance)
+#   • activation_blocked            (Activation blocked > threshold)
+#   • override_expired              (Override past expires_at)
+#   • migration_failed              (Migration commit job Failed)
+#   • storage_failed                (Storage reconciliation Failed / checksum)
+#   • delivery_repeatedly_failed    (Dead-lettered non-escalation deliveries)
+
+# Escalation source tag written on every escalation notification / delivery so
+# escalation-driven deliveries themselves are excluded from the "repeated
+# delivery failure" rule (avoids self-recursion).
+ESCALATION_TAG = "escalation"
+
+
+class EscalationRule(BaseModel):
+    rule_key: str
+    source_entity: str
+    title: str
+    priority: str = "High"
+    levels: List[Dict[str, Any]]  # [{level:1, after_minutes:0, targets:[{channel, recipient}]}, …]
+
+
+ESCALATION_RULES: List[EscalationRule] = [
+    EscalationRule(
+        rule_key="compliance_expired", source_entity="equipment_compliance",
+        title="Compliance record expired",
+        priority="Critical",
+        levels=[
+            {"level": 1, "after_minutes": 0,
+              "targets": [{"channel": "Email", "recipient": "role:Compliance"}]},
+            {"level": 2, "after_minutes": 60,
+              "targets": [{"channel": "Email", "recipient": "role:Manager"},
+                            {"channel": "In-App", "recipient": "role:Manager"}]},
+            {"level": 3, "after_minutes": 240,
+              "targets": [{"channel": "Email", "recipient": "role:Admin"}]},
+        ]),
+    EscalationRule(
+        rule_key="activation_blocked", source_entity="driver_activation",
+        title="Driver activation blocked",
+        priority="High",
+        levels=[
+            {"level": 1, "after_minutes": 0,
+              "targets": [{"channel": "In-App", "recipient": "role:Allocator"}]},
+            {"level": 2, "after_minutes": 120,
+              "targets": [{"channel": "Email", "recipient": "role:Manager"}]},
+            {"level": 3, "after_minutes": 480,
+              "targets": [{"channel": "Email", "recipient": "role:Admin"}]},
+        ]),
+    EscalationRule(
+        rule_key="override_expired", source_entity="driver_activation_override",
+        title="Activation override expired",
+        priority="High",
+        levels=[
+            {"level": 1, "after_minutes": 0,
+              "targets": [{"channel": "Email", "recipient": "role:Compliance"}]},
+            {"level": 2, "after_minutes": 120,
+              "targets": [{"channel": "Email", "recipient": "role:Manager"}]},
+        ]),
+    EscalationRule(
+        rule_key="migration_failed", source_entity="migration_commit_job",
+        title="Migration commit failed",
+        priority="Critical",
+        levels=[
+            {"level": 1, "after_minutes": 0,
+              "targets": [{"channel": "Email", "recipient": "role:Manager"}]},
+            {"level": 2, "after_minutes": 60,
+              "targets": [{"channel": "Email", "recipient": "role:Admin"}]},
+        ]),
+    EscalationRule(
+        rule_key="storage_failed", source_entity="storage_reconciliation_run",
+        title="Storage reconciliation failed",
+        priority="High",
+        levels=[
+            {"level": 1, "after_minutes": 0,
+              "targets": [{"channel": "Email", "recipient": "role:Manager"}]},
+            {"level": 2, "after_minutes": 120,
+              "targets": [{"channel": "Email", "recipient": "role:Admin"}]},
+        ]),
+    EscalationRule(
+        rule_key="delivery_repeatedly_failed", source_entity="notification_delivery",
+        title="Notification delivery dead-lettered",
+        priority="High",
+        levels=[
+            {"level": 1, "after_minutes": 0,
+              "targets": [{"channel": "In-App", "recipient": "role:Manager"}]},
+            {"level": 2, "after_minutes": 60,
+              "targets": [{"channel": "Email", "recipient": "role:Admin"}]},
+        ]),
+]
+
+ESCALATION_ACTIVE_WINDOW_HOURS = int(
+    os.environ.get("NOTIFICATION_ESCALATION_WINDOW_HOURS", "72") or "72")
+
+
+def _idempotency_key(rule_key: str, source_id: str, level: int,
+                       channel: str, recipient: str) -> str:
+    raw = f"{rule_key}|{source_id}|{level}|{channel}|{recipient}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+class EscalationService:
+    """Deterministic, idempotent escalation scanner.
+
+    * One incident row per ``(rule_key, source_entity, source_id)``.
+    * One escalation row per ``(incident, level, channel, recipient)``,
+      protected by a unique ``idempotency_key`` index at the collection.
+    * Detectors read business state; if the state no longer matches, the
+      incident is resolved (further scans do not create escalations).
+    * Escalation deliveries are tagged ``_source="escalation"`` so they are
+      excluded from the ``delivery_repeatedly_failed`` rule.
+    """
+
+    def __init__(self, db):
+        self.db = db
+
+    # ── Detectors ────────────────────────────────────────────────────────
+    async def _detect_compliance_expired(self) -> List[Dict[str, Any]]:
+        rows = await self.db["equipment_compliance_records"].find(
+            {"status": {"$in": ["Expired", "expired"]}, "is_archived": {"$ne": True}},
+            {"_id": 0, "id": 1, "equipment_id": 1, "compliance_type": 1,
+              "expiry_date": 1}).to_list(500)
+        return [{"source_id": r.get("id") or r.get("equipment_id"),
+                   "expiry_date": r.get("expiry_date"),
+                   "compliance_type": r.get("compliance_type"),
+                   "equipment_id": r.get("equipment_id")} for r in rows if r.get("id")]
+
+    async def _detect_activation_blocked(self) -> List[Dict[str, Any]]:
+        rows = await self.db["driver_activation_records"].find(
+            {"status": {"$in": ["Blocked", "blocked"]}, "is_archived": {"$ne": True}},
+            {"_id": 0, "driver_activation_id": 1, "driver_id": 1,
+              "readiness_status": 1, "outstanding_mandatory_count": 1}).to_list(500)
+        return [{"source_id": r["driver_activation_id"],
+                   "driver_id": r.get("driver_id"),
+                   "outstanding_mandatory_count": r.get("outstanding_mandatory_count")}
+                  for r in rows if r.get("driver_activation_id")]
+
+    async def _detect_override_expired(self) -> List[Dict[str, Any]]:
+        cutoff = _iso()
+        rows = await self.db["driver_activation_overrides"].find(
+            {"status": {"$in": ["Active", "active"]},
+              "is_archived": {"$ne": True},
+              "expires_at": {"$lt": cutoff}},
+            {"_id": 0, "activation_override_id": 1, "driver_id": 1,
+              "expires_at": 1}).to_list(500)
+        return [{"source_id": r["activation_override_id"],
+                   "driver_id": r.get("driver_id"),
+                   "expires_at": r.get("expires_at")}
+                  for r in rows if r.get("activation_override_id")]
+
+    async def _detect_migration_failed(self) -> List[Dict[str, Any]]:
+        rows = await self.db["migration_commit_jobs"].find(
+            {"status": {"$in": ["Failed", "failed"]}},
+            {"_id": 0, "migration_commit_job_id": 1, "name": 1,
+              "failure_reason": 1, "failed_at": 1}).to_list(500)
+        return [{"source_id": r["migration_commit_job_id"],
+                   "job_name": r.get("name"),
+                   "failure_reason": r.get("failure_reason"),
+                   "failed_at": r.get("failed_at")}
+                  for r in rows if r.get("migration_commit_job_id")]
+
+    async def _detect_storage_failed(self) -> List[Dict[str, Any]]:
+        rows = await self.db["storage_reconciliation_runs"].find(
+            {"$or": [{"status": "Failed"},
+                       {"missing_count": {"$gt": 0}},
+                       {"checksum_failure_count": {"$gt": 0}}]},
+            {"_id": 0, "storage_reconciliation_run_id": 1, "status": 1,
+              "missing_count": 1, "checksum_failure_count": 1}).to_list(500)
+        return [{"source_id": r["storage_reconciliation_run_id"],
+                   "status": r.get("status"),
+                   "missing_count": r.get("missing_count"),
+                   "checksum_failure_count": r.get("checksum_failure_count")}
+                  for r in rows if r.get("storage_reconciliation_run_id")]
+
+    async def _detect_delivery_repeatedly_failed(self) -> List[Dict[str, Any]]:
+        # Only user-facing deliveries. Escalation-generated deliveries are
+        # tagged ``_source="escalation"`` and MUST NOT trigger further escalation.
+        rows = await self.db[DELIVERIES_COLL].find(
+            {"delivery_status": "Dead Letter",
+              "_source": {"$ne": ESCALATION_TAG}},
+            {"_id": 0, "notification_delivery_id": 1, "channel": 1,
+              "last_failure_reason": 1}).to_list(500)
+        return [{"source_id": r["notification_delivery_id"],
+                   "channel": r.get("channel"),
+                   "last_failure_reason": r.get("last_failure_reason")}
+                  for r in rows if r.get("notification_delivery_id")]
+
+    DETECTORS = {
+        "compliance_expired": "_detect_compliance_expired",
+        "activation_blocked": "_detect_activation_blocked",
+        "override_expired": "_detect_override_expired",
+        "migration_failed": "_detect_migration_failed",
+        "storage_failed": "_detect_storage_failed",
+        "delivery_repeatedly_failed": "_detect_delivery_repeatedly_failed",
+    }
+
+    # ── Incident lifecycle ───────────────────────────────────────────────
+    async def _upsert_incident(self, rule: EscalationRule, source_id: str,
+                                  context: Dict[str, Any]) -> Dict[str, Any]:
+        now = _iso()
+        existing = await self.db[INCIDENTS_COLL].find_one(
+            {"rule_key": rule.rule_key, "source_entity": rule.source_entity,
+              "source_id": source_id}, {"_id": 0})
+        if existing:
+            await self.db[INCIDENTS_COLL].update_one(
+                {"notification_escalation_incident_id":
+                     existing["notification_escalation_incident_id"]},
+                {"$set": {"last_seen_at": now, "active": True,
+                           "context": {**(existing.get("context") or {}), **context},
+                           "updated_at": now}})
+            return {**existing, "last_seen_at": now, "active": True}
+        doc = {
+            "notification_escalation_incident_id": _uuid(),
+            "rule_key": rule.rule_key, "source_entity": rule.source_entity,
+            "source_id": source_id,
+            "first_seen_at": now, "last_seen_at": now,
+            "active": True, "current_level": 0,
+            "acknowledged_at": None, "acknowledged_by": None,
+            "resolved_at": None, "resolved_by": None,
+            "context": context,
+            "created_at": now, "updated_at": now,
+        }
+        await self.db[INCIDENTS_COLL].insert_one(doc)
+        return doc
+
+    async def _resolve_inactive(self, rule: EscalationRule,
+                                    seen_ids: set) -> int:
+        """Any incident for this rule not in ``seen_ids`` is resolved."""
+        now = _iso()
+        cursor = self.db[INCIDENTS_COLL].find(
+            {"rule_key": rule.rule_key, "active": True,
+              "source_id": {"$nin": list(seen_ids)}},
+            {"_id": 0, "notification_escalation_incident_id": 1})
+        count = 0
+        async for r in cursor:
+            await self.db[INCIDENTS_COLL].update_one(
+                {"notification_escalation_incident_id":
+                     r["notification_escalation_incident_id"]},
+                {"$set": {"active": False, "resolved_at": now,
+                           "resolved_by": "scanner",
+                           "updated_at": now}})
+            count += 1
+        return count
+
+    def _target_level(self, incident: Dict[str, Any],
+                        rule: EscalationRule) -> int:
+        """Compute level from age. Levels never decrease."""
+        try:
+            first = datetime.fromisoformat(incident["first_seen_at"])
+        except Exception:
+            first = datetime.now(timezone.utc)
+        age_minutes = int((datetime.now(timezone.utc) - first).total_seconds() // 60)
+        level = incident.get("current_level", 0) or 0
+        for spec in rule.levels:
+            if age_minutes >= spec["after_minutes"]:
+                level = max(level, spec["level"])
+        return level
+
+    async def _emit(self, rule: EscalationRule, incident: Dict[str, Any],
+                     level: int) -> Dict[str, int]:
+        """For each channel/recipient at ``level``, insert a notification +
+        delivery *if* the idempotency key isn't already recorded."""
+        created = 0
+        deduped = 0
+        target_spec = next((l for l in rule.levels if l["level"] == level), None)
+        if not target_spec:
+            return {"created": 0, "deduped": 0}
+        for tgt in target_spec.get("targets", []):
+            ch = tgt["channel"]
+            recipient = tgt["recipient"]
+            key = _idempotency_key(rule.rule_key,
+                                        incident["source_id"], level, ch, recipient)
+            existing = await self.db[ESCALATIONS_COLL].find_one(
+                {"idempotency_key": key}, {"_id": 0})
+            if existing:
+                deduped += 1
+                continue
+            # Build notification + delivery
+            notif_id = _uuid()
+            deliv_id = _uuid()
+            title = f"[Escalation L{level}] {rule.title}"
+            body = (f"Incident {incident['notification_escalation_incident_id'][:8]} "
+                     f"(rule={rule.rule_key}, source={rule.source_entity}"
+                     f"/{incident['source_id']}) has escalated to level {level}.")
+            await self.db[NOTIFICATIONS_COLL].insert_one({
+                "notification_id": notif_id, "title": title,
+                "body_text": body, "priority": rule.priority,
+                "notification_type": "Escalation",
+                "escalation_rule_key": rule.rule_key,
+                "escalation_incident_id":
+                     incident["notification_escalation_incident_id"],
+                "escalation_level": level,
+                "created_at": _iso(),
+                "_source": ESCALATION_TAG,
+            })
+            deliv_doc = {
+                "notification_delivery_id": deliv_id,
+                "notification_id": notif_id, "channel": ch.upper(),
+                "delivery_status": "Pending",
+                "recipient_address": recipient,
+                "attempts_made": 0, "created_at": _iso(),
+                "escalation_id_key": key,
+                "_source": ESCALATION_TAG,
+            }
+            if ch.upper() == "EMAIL":
+                deliv_doc["email_address"] = f"{recipient}@dcc.local"
+            elif ch.upper() == "SMS":
+                deliv_doc["mobile_number"] = "+15550000000"
+            await self.db[DELIVERIES_COLL].insert_one(deliv_doc)
+            try:
+                await self.db[ESCALATIONS_COLL].insert_one({
+                    "notification_escalation_id": _uuid(),
+                    "notification_escalation_incident_id":
+                         incident["notification_escalation_incident_id"],
+                    "rule_key": rule.rule_key,
+                    "source_entity": rule.source_entity,
+                    "source_id": incident["source_id"],
+                    "level": level, "channel": ch, "recipient": recipient,
+                    "idempotency_key": key,
+                    "notification_id": notif_id,
+                    "notification_delivery_id": deliv_id,
+                    "created_at": _iso(),
+                })
+                created += 1
+            except Exception:
+                # Duplicate key — race in a concurrent scan. Roll back the
+                # notification/delivery we just wrote so state stays coherent.
+                await self.db[NOTIFICATIONS_COLL].delete_one(
+                    {"notification_id": notif_id})
+                await self.db[DELIVERIES_COLL].delete_one(
+                    {"notification_delivery_id": deliv_id})
+                deduped += 1
+        return {"created": created, "deduped": deduped}
+
+    async def _process_rule(self, rule: EscalationRule) -> Dict[str, int]:
+        detector = getattr(self, self.DETECTORS[rule.rule_key])
+        triggers = await detector()
+        stats = {"triggers": len(triggers), "created": 0,
+                   "deduped": 0, "resolved": 0, "acknowledged_skipped": 0,
+                   "escalated_up": 0}
+        seen_ids = set()
+        for t in triggers:
+            source_id = t["source_id"]
+            seen_ids.add(source_id)
+            incident = await self._upsert_incident(rule, source_id, t)
+            # Explicit resolution honoured (from API).
+            if incident.get("resolved_at"):
+                continue
+            new_level = self._target_level(incident, rule)
+            if new_level == 0:
+                continue
+            if new_level > (incident.get("current_level") or 0):
+                await self.db[INCIDENTS_COLL].update_one(
+                    {"notification_escalation_incident_id":
+                         incident["notification_escalation_incident_id"]},
+                    {"$set": {"current_level": new_level,
+                               "updated_at": _iso()}})
+                incident["current_level"] = new_level
+                stats["escalated_up"] += 1
+            # Acknowledged incidents block new escalations at the SAME level.
+            if incident.get("acknowledged_at"):
+                ack_at_level = incident.get("acknowledged_at_level") or 0
+                if new_level <= ack_at_level:
+                    stats["acknowledged_skipped"] += 1
+                    continue
+            emit = await self._emit(rule, incident, new_level)
+            stats["created"] += emit["created"]
+            stats["deduped"] += emit["deduped"]
+        stats["resolved"] = await self._resolve_inactive(rule, seen_ids)
+        return stats
+
+    async def run_scan(self) -> Dict[str, Any]:
+        overall = {"created": 0, "deduped": 0, "resolved": 0,
+                     "triggers": 0, "escalated_up": 0,
+                     "acknowledged_skipped": 0, "per_rule": {}}
+        for rule in ESCALATION_RULES:
+            r = await self._process_rule(rule)
+            overall["per_rule"][rule.rule_key] = r
+            for k in ("created", "deduped", "resolved", "triggers",
+                        "escalated_up", "acknowledged_skipped"):
+                overall[k] += r.get(k, 0)
+        return overall
+
+    # ── Public API helpers ───────────────────────────────────────────────
+    async def acknowledge(self, incident_id: str, actor: str) -> Dict[str, Any]:
+        doc = await self.db[INCIDENTS_COLL].find_one(
+            {"notification_escalation_incident_id": incident_id}, {"_id": 0})
+        if not doc: raise HTTPException(status_code=404, detail="Not found")
+        await self.db[INCIDENTS_COLL].update_one(
+            {"notification_escalation_incident_id": incident_id},
+            {"$set": {"acknowledged_at": _iso(), "acknowledged_by": actor,
+                       "acknowledged_at_level": doc.get("current_level") or 0,
+                       "updated_at": _iso()}})
+        return {"acknowledged": True}
+
+    async def resolve(self, incident_id: str, actor: str) -> Dict[str, Any]:
+        doc = await self.db[INCIDENTS_COLL].find_one(
+            {"notification_escalation_incident_id": incident_id}, {"_id": 0})
+        if not doc: raise HTTPException(status_code=404, detail="Not found")
+        await self.db[INCIDENTS_COLL].update_one(
+            {"notification_escalation_incident_id": incident_id},
+            {"$set": {"resolved_at": _iso(), "resolved_by": actor,
+                       "active": False, "updated_at": _iso()}})
+        return {"resolved": True}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Scheduler: registry, locks, runs
 # ═══════════════════════════════════════════════════════════════════════════
@@ -721,6 +1147,7 @@ class SchedulerService:
         self.db = db
         self.locks = LockService(db)
         self.delivery = DeliveryService(db, providers)
+        self.escalation = EscalationService(db)
 
     async def seed_registry(self):
         for j in DEFAULT_JOBS:
@@ -803,8 +1230,7 @@ class SchedulerService:
             count = await self.db[DELIVERIES_COLL].count_documents({"delivery_status": "Dead Letter"})
             return {"dead_letter_backlog": count}
         if job_key == "notifications.escalation":
-            # Escalation deduplication placeholder
-            return {"escalations_created": 0, "deduped": 0}
+            return await self.escalation.run_scan()
         if job_key == "numbering.reservation_expiry":
             return {"expired": 0}
         if job_key == "numbering.reconciliation":
@@ -995,6 +1421,14 @@ async def ensure_indexes(db):
     await db[TEMPLATES_COLL].create_index("notification_template_id", unique=True)
     await db[TEMPLATES_COLL].create_index([("template_key", 1), ("channel", 1), ("version", 1)], unique=True)
     await db[PROVIDER_HEALTH_COLL].create_index("provider_key", unique=True)
+    # EB-15 · Escalation dedup indexes
+    await db[INCIDENTS_COLL].create_index("notification_escalation_incident_id", unique=True)
+    await db[INCIDENTS_COLL].create_index(
+        [("rule_key", 1), ("source_entity", 1), ("source_id", 1)], unique=True)
+    await db[INCIDENTS_COLL].create_index("active")
+    await db[ESCALATIONS_COLL].create_index("notification_escalation_id", unique=True)
+    await db[ESCALATIONS_COLL].create_index("idempotency_key", unique=True)
+    await db[ESCALATIONS_COLL].create_index("notification_escalation_incident_id")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1045,6 +1479,13 @@ class TemplateUpdate(BaseModel):
 
 class ResolveRequest(BaseModel):
     note: Optional[str] = None
+
+
+class PreviewRequest(BaseModel):
+    subject_template: str
+    body_template: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    channel: Optional[str] = "Email"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1317,6 +1758,71 @@ def build_automation_router(db, get_current_user):
         await db[TEMPLATES_COLL].update_one({"notification_template_id": template_id},
             {"$set": {"is_archived": True, "updated_at": _iso()}})
         return {"is_archived": True}
+
+    # ── Template preview (safe, no persistence) ─────────────────────────
+    @router.post("/notification-templates/preview")
+    async def preview_template(payload: PreviewRequest,
+                                    current=Depends(get_current_user)):
+        _require(current, ROLE_ALLOCATOR)
+        allowed = _extract_vars(payload.subject_template + " " + payload.body_template)
+        supplied = set((payload.context or {}).keys())
+        missing = [v for v in allowed if v not in supplied]
+        unknown = [k for k in supplied if k not in allowed]
+        rendered = render_template(payload.subject_template,
+                                        payload.body_template,
+                                        payload.context or {})
+        sms_length = len(rendered["body_text"] or "")
+        return {
+            "subject": rendered["subject"],
+            "body_text": rendered["body_text"],
+            "body_html_sanitised": rendered.get("body_html", ""),
+            "allowed_variables": allowed,
+            "missing_variables": missing,
+            "unknown_variables": unknown,
+            "sms_length": sms_length,
+            "sms_segments": max(1, (sms_length + 152) // 153) if sms_length else 0,
+            "channel": payload.channel,
+        }
+
+    # ── Escalation endpoints ────────────────────────────────────────────
+    @router.get("/escalation-incidents")
+    async def list_incidents(active: Optional[bool] = None,
+                                rule_key: Optional[str] = None,
+                                limit: int = 200,
+                                current=Depends(get_current_user)):
+        _require(current, ROLE_ALLOCATOR)
+        q: Dict[str, Any] = {}
+        if active is not None: q["active"] = active
+        if rule_key: q["rule_key"] = rule_key
+        return await db[INCIDENTS_COLL].find(q, {"_id": 0}).sort("last_seen_at", -1).limit(limit).to_list(limit)
+
+    @router.get("/escalation-incidents/{incident_id}")
+    async def get_incident(incident_id: str, current=Depends(get_current_user)):
+        _require(current, ROLE_ALLOCATOR)
+        r = await db[INCIDENTS_COLL].find_one(
+            {"notification_escalation_incident_id": incident_id}, {"_id": 0})
+        if not r: raise HTTPException(status_code=404, detail="Not found")
+        esc = await db[ESCALATIONS_COLL].find(
+            {"notification_escalation_incident_id": incident_id},
+            {"_id": 0}).sort("created_at", 1).to_list(200)
+        return {**r, "escalations": esc}
+
+    @router.post("/escalation-incidents/{incident_id}/acknowledge")
+    async def ack_incident(incident_id: str, current=Depends(get_current_user)):
+        _require(current, ROLE_MANAGER)
+        esc_svc = EscalationService(db)
+        return await esc_svc.acknowledge(incident_id, current.get("email"))
+
+    @router.post("/escalation-incidents/{incident_id}/resolve")
+    async def resolve_incident(incident_id: str, current=Depends(get_current_user)):
+        _require(current, ROLE_MANAGER)
+        esc_svc = EscalationService(db)
+        return await esc_svc.resolve(incident_id, current.get("email"))
+
+    @router.get("/escalation-rules")
+    async def list_rules(current=Depends(get_current_user)):
+        _require(current, ROLE_ALLOCATOR)
+        return [r.model_dump() for r in ESCALATION_RULES]
 
     return router
 

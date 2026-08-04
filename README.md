@@ -1,6 +1,6 @@
 # Driver Command Centre — ACE Car Freighters
 
-> **Status:** Phase 2 Foundation Build (EB-12) — staging branch · `dcc-phase2-eb12`
+> **Status:** Phase 2 Foundation Build (EB-16) — staging branch · `dcc-phase2-eb16`
 > **Baseline release:** Phase 1 · `v0.1-phase1-baseline` (unchanged, on `main`)
 > **Previous builds:** EB-01 through EB-11 complete · EB-12 = **Migration Preparation, Mapping & Dry-Run Control** (this build)
 

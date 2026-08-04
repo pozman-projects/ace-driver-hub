@@ -6,23 +6,30 @@ import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import {
   Gauge, Clock, EnvelopeSimple, ShieldCheck, ArrowClockwise,
-  Warning, CheckCircle, XCircle, ListChecks,
+  Warning, CheckCircle, XCircle, ListChecks, Camera,
 } from "@phosphor-icons/react";
 
 /**
  * EB-15 — Automation & Delivery Operations Hub.
  * Read-first status page for Allocators+, action panels for Managers/Admins.
+ * EB-16 adds Automation Health History.
  */
 export default function AutomationHub() {
   const { user } = useAuth();
   const [status, setStatus] = useState(null);
+  const [snapshots, setSnapshots] = useState([]);
+  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get("/automation/status");
-      setStatus(data);
+      const [statusRes, snapRes] = await Promise.all([
+        api.get("/automation/status"),
+        api.get("/automation/health-snapshots?limit=50").catch(() => ({ data: [] })),
+      ]);
+      setStatus(statusRes.data);
+      setSnapshots(snapRes.data || []);
     } catch (e) {
       toast.error(
         formatApiErrorDetail(e?.response?.data?.detail) || "Failed to load automation status",
@@ -33,6 +40,19 @@ export default function AutomationHub() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const takeSnapshot = async () => {
+    setBusy(true);
+    try {
+      await api.post("/automation/health-snapshots");
+      toast.success("Health snapshot captured");
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail));
+    } finally { setBusy(false); }
+  };
+
+  const canManage = user?.role === "Manager" || user?.role === "Admin";
 
   if (user && !["Allocator", "Compliance", "Manager", "Admin"].includes(user.role)) {
     return <Navigate to="/" replace />;
@@ -117,11 +137,100 @@ export default function AutomationHub() {
                        title="Template Studio"
                        desc="Create drafts, preview, approve, clone and archive templates."
                        testid="nav-templates" />
+              <NavCard to="/administration/automation/incidents"
+                       title="Escalation Incidents"
+                       desc="Open incidents with ack/resolve/reopen actions per rule."
+                       testid="nav-incidents" />
+              <NavCard to="/administration/integrity"
+                       title="Integrity & Release Gate"
+                       desc="Cross-module integrity findings and release gate."
+                       testid="nav-integrity" />
+              <NavCard to="/operations"
+                       title="Operations Dashboard"
+                       desc="Live operational health, dead-letters and open incidents."
+                       testid="nav-ops" />
             </div>
 
             <div className="mt-6 text-xs text-slate-500" data-testid="automation-tz-note">
               Timezone: <b>{status.default_timezone}</b> · Quiet hours{" "}
               {status.quiet_hours_start}:00–{status.quiet_hours_end}:00
+            </div>
+
+            {/* EB-16 · Health History */}
+            <div className="mt-8" data-testid="health-history-section">
+              <div className="flex items-baseline justify-between mb-3">
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Health history (last 50 snapshots)
+                </h2>
+                {canManage && (
+                  <button
+                    data-testid="capture-snapshot"
+                    disabled={busy}
+                    onClick={takeSnapshot}
+                    className="text-xs px-3 py-1.5 rounded border border-cyan-300 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 flex items-center gap-1.5">
+                    <Camera size={14} weight="bold" /> Capture Snapshot
+                  </button>
+                )}
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                {snapshots.length === 0 && (
+                  <div className="p-4 text-sm text-slate-500 text-center">
+                    No health snapshots yet — use Capture Snapshot above.
+                  </div>
+                )}
+                {snapshots.length > 0 && (
+                  <>
+                    {/* Simple accessible bar chart */}
+                    <div className="p-4 flex items-end gap-1 overflow-x-auto" data-testid="health-chart">
+                      {[...snapshots].reverse().slice(-30).map((s) => {
+                        const value = (s.dead_letters || 0) + (s.failed_jobs || 0) + (s.open_incidents || 0);
+                        const h = Math.max(6, Math.min(80, 6 + value * 4));
+                        const color = s.overall_health === "Critical" ? "bg-rose-500"
+                          : s.overall_health === "Warning" ? "bg-amber-400" : "bg-emerald-500";
+                        return (
+                          <div key={s.automation_health_snapshot_id}
+                               title={`${s.captured_at} · ${s.overall_health} · combined=${value}`}
+                               style={{ height: `${h}px` }}
+                               data-testid={`chart-bar-${s.automation_health_snapshot_id.slice(0, 8)}`}
+                               className={`w-3 rounded-t ${color}`} />
+                        );
+                      })}
+                    </div>
+                    <table className="w-full text-xs" data-testid="health-history-table">
+                      <thead className="bg-slate-50 text-slate-600 uppercase">
+                        <tr>
+                          <th className="text-left px-3 py-2">Captured</th>
+                          <th className="text-left px-3 py-2">Health</th>
+                          <th className="text-left px-3 py-2">Dead-letters</th>
+                          <th className="text-left px-3 py-2">Failed jobs</th>
+                          <th className="text-left px-3 py-2">Open incidents</th>
+                          <th className="text-left px-3 py-2">Blocked drivers</th>
+                          <th className="text-left px-3 py-2">Migration</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {snapshots.slice(0, 15).map((s) => (
+                          <tr key={s.automation_health_snapshot_id} className="border-t border-slate-100">
+                            <td className="px-3 py-1.5">{s.captured_at}</td>
+                            <td className="px-3 py-1.5">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                s.overall_health === "Critical" ? "bg-rose-50 text-rose-700"
+                                : s.overall_health === "Warning" ? "bg-amber-50 text-amber-700"
+                                : "bg-emerald-50 text-emerald-700"
+                              }`}>{s.overall_health}</span>
+                            </td>
+                            <td className="px-3 py-1.5">{s.dead_letters}</td>
+                            <td className="px-3 py-1.5">{s.failed_jobs}</td>
+                            <td className="px-3 py-1.5">{s.open_incidents}</td>
+                            <td className="px-3 py-1.5">{s.blocked_drivers}</td>
+                            <td className="px-3 py-1.5">{s.migration_state}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </div>
             </div>
           </>
         )}

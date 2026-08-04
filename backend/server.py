@@ -555,6 +555,13 @@ async def on_startup():
     _providers = ProviderRegistry()
     await SchedulerService(db, _providers).seed_registry()
     await _seed_templates(db)
+    # --- EB-16 Integrity, Operations, Webhooks ---
+    from integrity_module import (
+        ensure_indexes as int_ensure_indexes,
+        IntegrityService as EB16IntegrityService,
+    )
+    await int_ensure_indexes(db)
+    await EB16IntegrityService(db).seed_definitions()
 
 
 # Include router and CORS
@@ -621,6 +628,10 @@ from scheduler_module import (  # noqa: E402
 )
 app.include_router(build_automation_router(db, get_current_user))
 app.include_router(build_scheduler_internal_router(db, get_current_user))
+
+# --- EB-16 Integrity, Operations, Webhooks, Rehearsal ---
+from integrity_module import build_integrity_router  # noqa: E402
+app.include_router(build_integrity_router(db, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

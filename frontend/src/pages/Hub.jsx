@@ -342,6 +342,34 @@ export default function Hub() {
               </div>
               <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
             </Link>
+            <Link
+              to="/operations"
+              data-testid="operations-hub-card"
+              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+            >
+              <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
+                <ArrowsDownUp size={20} weight="regular" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Operations</div>
+                <div className="text-[11px] text-slate-500 truncate">Command dashboard, readiness & compliance workload.</div>
+              </div>
+              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+            </Link>
+            <Link
+              to="/administration/integrity"
+              data-testid="integrity-hub-card"
+              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+            >
+              <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg group-hover:bg-indigo-500 group-hover:text-white transition-colors">
+                <ArrowsDownUp size={20} weight="regular" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Integrity & Release Gate</div>
+                <div className="text-[11px] text-slate-500 truncate">Cross-module checks and pre-release gate.</div>
+              </div>
+              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+            </Link>
           </div>
         </section>
         <section className="mb-4" data-testid="canonical-compliance-section">

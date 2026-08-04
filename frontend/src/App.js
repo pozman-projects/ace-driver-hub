@@ -36,6 +36,12 @@ import AutomationJobsPage from "./pages/AutomationJobsPage";
 import AutomationDeliveriesPage from "./pages/AutomationDeliveriesPage";
 import AutomationProvidersPage from "./pages/AutomationProvidersPage";
 import AutomationTemplatesPage from "./pages/AutomationTemplatesPage";
+import AutomationIncidentsPage from "./pages/AutomationIncidentsPage";
+import OperationsDashboard from "./pages/OperationsDashboard";
+import DriverReadinessPage from "./pages/DriverReadinessPage";
+import ComplianceWorkloadPage from "./pages/ComplianceWorkloadPage";
+import MigrationReadinessPage from "./pages/MigrationReadinessPage";
+import IntegrityAdminPage from "./pages/IntegrityAdminPage";
 
 function App() {
   return (
@@ -218,6 +224,12 @@ function App() {
             <Route path="/administration/automation/deliveries" element={<ProtectedRoute><AutomationDeliveriesPage /></ProtectedRoute>} />
             <Route path="/administration/automation/providers" element={<ProtectedRoute><AutomationProvidersPage /></ProtectedRoute>} />
             <Route path="/administration/automation/templates" element={<ProtectedRoute><AutomationTemplatesPage /></ProtectedRoute>} />
+            <Route path="/administration/automation/incidents" element={<ProtectedRoute><AutomationIncidentsPage /></ProtectedRoute>} />
+            <Route path="/administration/integrity" element={<ProtectedRoute><IntegrityAdminPage /></ProtectedRoute>} />
+            <Route path="/operations" element={<ProtectedRoute><OperationsDashboard /></ProtectedRoute>} />
+            <Route path="/operations/driver-readiness" element={<ProtectedRoute><DriverReadinessPage /></ProtectedRoute>} />
+            <Route path="/operations/compliance-workload" element={<ProtectedRoute><ComplianceWorkloadPage /></ProtectedRoute>} />
+            <Route path="/operations/migration-readiness" element={<ProtectedRoute><MigrationReadinessPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster position="top-right" richColors closeButton />

@@ -1019,8 +1019,11 @@ class OperationsService:
                                   limit: int = 200) -> List[Dict[str, Any]]:
         d = self.db
         rows = []
-        async for rec in d["driver_activation_records"].find(
-            {}, {"_id": 0}).limit(limit):
+        # Sort by updated_at DESC so freshly-updated records (e.g. rehearsal seed,
+        # recent recalculations) surface first inside the pagination window.
+        cursor = d["driver_activation_records"].find(
+            {}, {"_id": 0}).sort("updated_at", -1).limit(limit)
+        async for rec in cursor:
             driver = await d["drivers"].find_one(
                 {"id": rec.get("driver_id")}, {"_id": 0})
             if not driver: continue

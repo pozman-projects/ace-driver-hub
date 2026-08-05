@@ -42,6 +42,7 @@ import DriverReadinessPage from "./pages/DriverReadinessPage";
 import ComplianceWorkloadPage from "./pages/ComplianceWorkloadPage";
 import MigrationReadinessPage from "./pages/MigrationReadinessPage";
 import IntegrityAdminPage from "./pages/IntegrityAdminPage";
+import SecurityControlCentre from "./pages/SecurityControlCentre";
 
 function App() {
   return (
@@ -226,6 +227,7 @@ function App() {
             <Route path="/administration/automation/templates" element={<ProtectedRoute><AutomationTemplatesPage /></ProtectedRoute>} />
             <Route path="/administration/automation/incidents" element={<ProtectedRoute><AutomationIncidentsPage /></ProtectedRoute>} />
             <Route path="/administration/integrity" element={<ProtectedRoute><IntegrityAdminPage /></ProtectedRoute>} />
+            <Route path="/administration/security" element={<ProtectedRoute><SecurityControlCentre /></ProtectedRoute>} />
             <Route path="/operations" element={<ProtectedRoute><OperationsDashboard /></ProtectedRoute>} />
             <Route path="/operations/driver-readiness" element={<ProtectedRoute><DriverReadinessPage /></ProtectedRoute>} />
             <Route path="/operations/compliance-workload" element={<ProtectedRoute><ComplianceWorkloadPage /></ProtectedRoute>} />

@@ -1201,6 +1201,7 @@ def build_activation_router(db, get_current_user):
 
     @router.post("/drivers/{driver_id}/activation/recalculate")
     async def recalc(driver_id: str, current=Depends(get_current_user)):
+        _require(current["role"], {"Admin", "Manager", "Compliance", "Allocator"})
         return await svc.recalculate(driver_id, current["email"])
 
     @router.post("/drivers/{driver_id}/activation/activate")
@@ -1283,7 +1284,7 @@ def build_activation_router(db, get_current_user):
             return {"events": []}
         events = await db[EVT_COLL].find(
             {"driver_activation_id": rec["driver_activation_id"]}, {"_id": 0},
-        ).sort("performed_at", -1).to_list(1000)
+        ).sort("performed_at", -1).to_list(5000)
         return {"events": events}
 
     @router.get("/drivers/{driver_id}/activation/items")

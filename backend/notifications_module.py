@@ -1800,6 +1800,9 @@ def build_notifications_router(db, get_current_user):
 
     @router.put("/notifications/{notification_id}/read")
     async def mark_read(notification_id: str, current=Depends(get_current_user)):
+        # Any authenticated non-ReadOnly user may mark a notification read.
+        if current.get("role") == "ReadOnly":
+            raise HTTPException(status_code=403, detail="ReadOnly cannot mark notifications read")
         r = await db[NOTIFS_COLL].update_one(
             {"notification_id": notification_id},
             {"$set": {"is_read": True, "read_at": _iso(), "updated_at": _iso()}},

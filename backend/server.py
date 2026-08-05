@@ -184,7 +184,7 @@ def _validate_resource(resource: str):
 @api_router.get("/modules/{resource}")
 async def list_module_items(resource: str, current=Depends(get_current_user)):
     coll_name = _validate_resource(resource)
-    items = await db[coll_name].find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    items = await db[coll_name].find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
     return items
 
 
@@ -562,6 +562,13 @@ async def on_startup():
     )
     await int_ensure_indexes(db)
     await EB16IntegrityService(db).seed_definitions()
+    # --- EB-17a Security Foundation ---
+    from security_module import (
+        ensure_indexes as sec_ensure_indexes,
+        SecurityService as EB17SecurityService,
+    )
+    await sec_ensure_indexes(db)
+    await EB17SecurityService(db, app=app).seed_controls()
 
 
 # Include router and CORS
@@ -632,6 +639,10 @@ app.include_router(build_scheduler_internal_router(db, get_current_user))
 # --- EB-16 Integrity, Operations, Webhooks, Rehearsal ---
 from integrity_module import build_integrity_router  # noqa: E402
 app.include_router(build_integrity_router(db, get_current_user))
+
+# --- EB-17a Security Foundation ---
+from security_module import build_security_router  # noqa: E402
+app.include_router(build_security_router(db, app, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

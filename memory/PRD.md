@@ -1264,3 +1264,27 @@ No UI changes in this close-out. Frontend baseline from EB-16 iteration
 - ✅ Webhooks default-disabled.
 - ✅ No deploy, no GitHub push, `main` untouched.
 
+---
+
+## EB-17a — Security Foundation (Feb 2026) ✅ COMPLETE
+
+Parts 1–9 delivered — **backend suite: 589 passed / 1 skipped / 0 failed** (6m 18s).
+
+### What shipped
+- `backend/security_module.py` — 19 controls across 6 domains (AuthSession, RBAC, API, Secrets, Privacy, AuditLog); 7 new collections; delegation-aware permission-matrix builder; idempotent assessment runner; append-only exception approval trail.
+- `backend/tests/test_security_eb17.py` — 38 tests, ALL local (`http://localhost:8001/api`), 0 skips.
+- `frontend/src/pages/SecurityControlCentre.jsx` at `/administration/security` — 7 tabs (Overview, Controls, Findings, Permission Matrix, Data Classification, Audit Integrity, Exceptions) with role-gated actions and exception-request modal. Hub tile added.
+- Pre-existing gate gaps closed while hardening: recalculate, imports (inspect/mapping/validate), notifications/read.
+- `/api/modules/{resource}` limit lifted 1000 → 5000; activation history limit 1000 → 5000; `driver-readiness` now sorted by `updated_at DESC` so freshly-seeded records surface within pagination window.
+- Full requirement matrix at `/app/memory/EB-17a-REQUIREMENT-MATRIX.md`.
+
+### What is next (DO NOT auto-start)
+- **P1 EB-17b** — Backup, restore, disaster recovery, RPO/RTO.
+- **P1 EB-17c** — UAT framework, sign-offs, Production Readiness gate, rollback plan.
+- **P2 EB-18** — Controlled Go-Live.
+
+### Constraints honoured
+- ✅ Fictional/sanitised data only.
+- ✅ No preview URLs in EB-17a tests; local-only.
+- ✅ No conditional skips in `test_security_eb17.py`.
+- ✅ No live cron, no real providers, no GitHub push, `main` untouched.

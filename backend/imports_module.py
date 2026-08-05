@@ -834,6 +834,7 @@ def build_imports_router(db, get_current_user):
 
     @router.post("/imports/{job_id}/inspect")
     async def choose_sheet(job_id: str, payload: dict, current=Depends(get_current_user)):
+        _require_role(current, ("Admin", "Manager", "Compliance", "Allocator"))
         job = await _get_job(job_id)
         sheet = payload.get("sheet_name")
         if not sheet:
@@ -850,6 +851,7 @@ def build_imports_router(db, get_current_user):
     @router.post("/imports/{job_id}/mapping")
     async def set_mapping(job_id: str, payload: dict, current=Depends(get_current_user)):
         """Payload: {"field_mappings": {source_header: target_field_key}, "name"?: str}. Creates or updates a mapping and attaches it to the job."""
+        _require_role(current, ("Admin", "Manager", "Compliance", "Allocator"))
         job = await _get_job(job_id)
         headers_map = payload.get("field_mappings") or {}
         if not headers_map:
@@ -892,6 +894,7 @@ def build_imports_router(db, get_current_user):
 
     @router.post("/imports/{job_id}/validate")
     async def validate(job_id: str, current=Depends(get_current_user)):
+        _require_role(current, ("Admin", "Manager", "Compliance", "Allocator"))
         job = await _get_job(job_id)
         if not job.get("mapping_id") or not job.get("sheet_name"):
             raise HTTPException(status_code=400, detail="Mapping and sheet required before validation")

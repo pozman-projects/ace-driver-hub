@@ -66,25 +66,31 @@ def compliance_headers(admin_headers):
 @pytest.fixture(autouse=True)
 def _clean_eb17b_state():
     """Purge fictional EB-17b rows from every live collection so each test
-    starts from a known baseline. NO writes to non-fictional rows."""
+    starts from a known baseline. NO writes to non-fictional rows.
+
+    Cleans on entry AND on exit so other test files aren't polluted by
+    leftover seed-eb17b rows in shared collections (drivers, owners, ...)."""
     d = _db()
     from recovery_module import (
         DOMAIN_COLLECTIONS, DEF_COLL, RUN_COLL, ART_COLL, MAN_COLL,
         REH_COLL, RECON_COLL, EVT_COLL, CFG_COLL, NS_COLL,
     )
-    for domain, colls in DOMAIN_COLLECTIONS.items():
-        for c in colls:
+    def _wipe():
+        for _domain, colls in DOMAIN_COLLECTIONS.items():
+            for c in colls:
+                try:
+                    d[c].delete_many({"_source": "seed-eb17b"})
+                except Exception:
+                    pass
+        for c in (DEF_COLL, RUN_COLL, ART_COLL, MAN_COLL,
+                  REH_COLL, RECON_COLL, EVT_COLL, NS_COLL):
             try:
                 d[c].delete_many({"_source": "seed-eb17b"})
             except Exception:
                 pass
-    for c in (DEF_COLL, RUN_COLL, ART_COLL, MAN_COLL,
-              REH_COLL, RECON_COLL, EVT_COLL, NS_COLL):
-        try:
-            d[c].delete_many({"_source": "seed-eb17b"})
-        except Exception:
-            pass
+    _wipe()
     yield
+    _wipe()
 
 
 def _seed_fictional_state(db_):
@@ -110,13 +116,14 @@ def _seed_fictional_state(db_):
         "driver_activation_id": _uuid_short(), "driver_id": d1_id,
         "status": "In Progress", "_source": "seed-eb17b"})
     db_["security_assessment_events"].insert_one({
+        "security_assessment_event_id": _uuid_short(),
         "id": _uuid_short(), "event_type": "eb17b.audit", "at": _iso(),
         "_source": "seed-eb17b"})
     return {"driver_ids": [d1_id, d2_id], "owner_id": o1_id, "storage_key": storage_key}
 
 
 def _uuid_short():
-    return uuid.uuid4().hex
+    return str(uuid.uuid4())
 
 
 def _iso():
@@ -568,3 +575,119 @@ class TestRBAC:
                                 "backup_age_warning_hours": 6},
                           timeout=30)
         assert r.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PART 10 — Real EB-16 Integrity + EB-17a Security engines against
+# the isolated scratch namespace (no proxy/mock checks)
+# ═══════════════════════════════════════════════════════════════════
+class TestRealNamespaceEngines:
+    def _clean_backup(self, admin_headers):
+        _seed_fictional_state(_db())
+        return requests.post(f"{API}/backups", headers=admin_headers,
+                             json={}, timeout=60).json()
+
+    def test_clean_rehearsal_real_engines_pass(self, admin_headers):
+        """Clean fictional dataset → both real engines PASS. Rehearsal
+        record must include engine result payloads and the scratch DB
+        name proving isolation."""
+        b = self._clean_backup(admin_headers)
+        r = requests.post(f"{API}/recovery/rehearsals", headers=admin_headers,
+                          json={"backup_run_id": b["backup_run_id"],
+                                "approved": True}, timeout=180).json()
+        assert r["final_state"] == "Passed", r
+        assert r["integrity_gate"] == "PASS"
+        assert r["security_gate"] == "PASS"
+        # Engine payloads must be populated — proves real engines ran
+        assert "integrity_engine_counts" in r
+        assert "security_engine_counts" in r
+        assert r.get("security_engine_result") in ("PASS", "PASS_WITH_WARNINGS")
+        # Scratch DB isolation — must have been named and dropped
+        assert r.get("namespace_scratch_db")
+        assert r.get("namespace_scratch_db") != _db().name
+        # Confirm scratch DB was dropped by mongo client
+        client = MongoClient(os.environ["MONGO_URL"])
+        assert r["namespace_scratch_db"] not in client.list_database_names()
+
+    def test_security_defect_seeded_in_namespace_fails_security_gate(
+        self, admin_headers,
+    ):
+        """Seed a security_assessment_events row with the mutation marker
+        `updated_at` set — the EB-17a `audit.security_events_immutable`
+        Critical rule will trigger inside the scratch namespace and force
+        security_gate = FAIL. Live DB security posture is untouched."""
+        d = _db()
+        d["security_assessment_events"].insert_one({
+            "security_assessment_event_id": _uuid_short(),
+            "id": _uuid_short(),
+            "event_type": "eb17b.tampered",
+            "at": _iso(),
+            "updated_at": _iso(),  # violates immutability rule
+            "_source": "seed-eb17b",
+        })
+        b = self._clean_backup(admin_headers)
+        r = requests.post(f"{API}/recovery/rehearsals", headers=admin_headers,
+                          json={"backup_run_id": b["backup_run_id"],
+                                "approved": True}, timeout=180).json()
+        # Security gate FAIL; other gates untouched
+        assert r["security_gate"] == "FAIL", r
+        assert r["final_state"] == "Failed"
+        # Engine actually flagged Critical
+        counts = r.get("security_engine_counts") or {}
+        assert counts.get("Critical", 0) >= 1, r
+
+    def test_integrity_defect_seeded_in_namespace_fails_integrity_gate(
+        self, admin_headers,
+    ):
+        """Seed two drivers with the same driver_code in the fictional
+        seed → the EB-16 `_reg_duplicate_driver_code` rule (Critical
+        severity) will trigger inside the scratch namespace and force
+        integrity_gate = FAIL."""
+        d = _db()
+        _seed_fictional_state(d)
+        shared_code = 999999
+        d["drivers"].insert_many([
+            {"id": _uuid_short(), "name": "DupCode A",
+             "driver_code": shared_code, "_source": "seed-eb17b"},
+            {"id": _uuid_short(), "name": "DupCode B",
+             "driver_code": shared_code, "_source": "seed-eb17b"},
+        ])
+        b = requests.post(f"{API}/backups", headers=admin_headers,
+                          json={}, timeout=60).json()
+        r = requests.post(f"{API}/recovery/rehearsals", headers=admin_headers,
+                          json={"backup_run_id": b["backup_run_id"],
+                                "approved": True}, timeout=180).json()
+        assert r["integrity_gate"] == "FAIL", r
+        assert r["final_state"] == "Failed"
+        counts = r.get("integrity_engine_counts") or {}
+        # Duplicate driver_code is severity Critical in the EB-16 catalogue
+        assert (counts.get("Error", 0) + counts.get("Critical", 0)) >= 1, r
+
+    def test_live_db_state_does_not_contaminate_rehearsal(self, admin_headers):
+        """Live/dev security_assessment_events rows without _source tag
+        must NOT flow into the scratch namespace and must NOT cause the
+        namespace-scoped security gate to FAIL. Proves the rehearsal
+        runs against the isolated copy, not the live DB."""
+        d = _db()
+        # Inject a tampered event OUTSIDE the fictional _source scope.
+        # This must NEVER be picked up because backup snapshot only
+        # captures rows tagged _source=seed-eb17b.
+        contaminant_id = _uuid_short()
+        d["security_assessment_events"].insert_one({
+            "security_assessment_event_id": _uuid_short(),
+            "id": contaminant_id,
+            "event_type": "live.contaminant",
+            "at": _iso(),
+            "updated_at": _iso(),  # would fail immutability if seen
+            "_source": "live-not-eb17b",
+        })
+        try:
+            b = self._clean_backup(admin_headers)
+            r = requests.post(f"{API}/recovery/rehearsals",
+                              headers=admin_headers,
+                              json={"backup_run_id": b["backup_run_id"],
+                                    "approved": True}, timeout=180).json()
+            assert r["security_gate"] == "PASS", r
+            assert r["final_state"] == "Passed"
+        finally:
+            d["security_assessment_events"].delete_one({"id": contaminant_id})

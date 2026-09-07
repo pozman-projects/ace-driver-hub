@@ -56,6 +56,7 @@ export default function RecoveryDashboard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
   const [cfgForm, setCfgForm] = useState(null);
+  const [cfgError, setCfgError] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,6 +115,24 @@ export default function RecoveryDashboard() {
 
   const saveConfig = async () => {
     if (!cfgForm) return;
+    // Client-side bounds validation — prevents any XHR (and any 422)
+    // from being emitted for intentional invalid RPO/RTO input.
+    const errs = [];
+    const rpo = Number(cfgForm.rpo_target_minutes);
+    const rto = Number(cfgForm.rto_target_minutes);
+    const age = Number(cfgForm.backup_age_warning_hours);
+    if (!Number.isFinite(rpo) || rpo < 1 || rpo > 100000)
+      errs.push("RPO must be between 1 and 100000 minutes.");
+    if (!Number.isFinite(rto) || rto < 1 || rto > 100000)
+      errs.push("RTO must be between 1 and 100000 minutes.");
+    if (!Number.isFinite(age) || age < 1 || age > 720)
+      errs.push("Backup age warning must be between 1 and 720 hours.");
+    if (errs.length) {
+      setCfgError(errs.join(" "));
+      toast.error(errs.join(" "));
+      return;
+    }
+    setCfgError(null);
     setBusy("cfg");
     try {
       const { data } = await api.post("/recovery/configuration", cfgForm);
@@ -403,6 +422,13 @@ export default function RecoveryDashboard() {
                         Production-approved values require future explicit process — not settable here.
                       </div>
                     </div>
+                    {cfgError && (
+                      <div data-testid="cfg-validation-error"
+                           role="alert"
+                           className="mt-2 text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded px-2 py-1">
+                        {cfgError}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

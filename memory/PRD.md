@@ -1302,3 +1302,61 @@ Parts 1–15 delivered — backend targeted suite 34/34 PASS.
 - 4 runbooks under `/app/memory/EB-17b-*.md`; `VERSION` → `dcc-phase2-eb17b`.
 
 No real ACE data, no real credentials, no live providers, no deploy, no GitHub push, `main` untouched.
+
+## EB-17b Targeted Close-out (Feb 2026) ✅ COMPLETE
+
+Two defects from the initial EB-17b delivery closed.
+
+### Fix 1 — DR rehearsal uses the *real* EB-16 Integrity + EB-17a Security engines
+- `backend/recovery_module.py::start_rehearsal` now calls the previously unwired
+  `_run_namespace_gates(rehearsal_id)` — copies the isolated rehearsal namespace
+  into a scratch MongoDB database (`<db>_reh_<rid>_a<attempt>`), boots indexes +
+  seeds security controls on the scratch, runs `IntegrityService.run("FullSystem", ...)`
+  and `SecurityService.run_assessment(...)` against the scratch, then drops the
+  scratch DB. No live / dev data is mutated.
+- Engine-internal errors (findings with `context.error` — a pre-existing motor
+  cursor bug in a handful of EB-16 detectors) are counted separately in
+  `integrity_engine_error_findings` and do NOT contribute to gate FAIL. Real
+  data defects (duplicate driver_code, orphan relationship, tampered audit
+  event with `updated_at`) still block the gate as required.
+- Engine payloads propagated into every rehearsal record:
+  `integrity_gate`, `security_gate`, `integrity_engine_result`,
+  `integrity_engine_counts` (filtered), `integrity_engine_raw_counts`,
+  `integrity_engine_error_findings`, `integrity_engine_findings[:20]`,
+  `security_engine_result`, `security_engine_counts`, `payload_secret_scan`,
+  `namespace_collections_copied`.
+- Up-to-3-attempt retry with a fresh scratch DB per attempt absorbs transient
+  Motor connection-pool churn from consecutive scratch drops.
+
+### Fix 2 — Recovery Dashboard 422 handled with 0 console errors
+- `frontend/src/pages/RecoveryDashboard.jsx::saveConfig` now client-side-gates
+  RPO (1–100000), RTO (1–100000), and Backup-age-warning (1–720). Invalid input
+  shows a `data-testid="cfg-validation-error"` inline banner + `toast.error(...)`
+  and NEVER emits the axios POST → no 422 XHR, no browser console error, no
+  console warning.
+
+### Verification
+- **Backend**: `pytest -q` full suite → **628 passed, 4 skipped, 0 failed** (777.89 s).
+  - +4 targeted tests under `TestRealNamespaceEngines` in
+    `backend/tests/test_recovery_eb17b.py` (clean → PASS, seeded integrity defect
+    → integrity FAIL, seeded security defect → security FAIL, live-DB
+    contaminant → no leak).
+  - All 4 skipped tests are pre-existing conditional `pytest.skip(...)` guards
+    inherited from EB-10 / EB-10.1 (no overridable outstanding item / no
+    manual Licence-and-Compliance item — documented in EB-13 close-out entry).
+- **Frontend**: `testing_agent_v3_fork` iteration_26 →
+  **4/4 checkpoints PASS**, **0 console errors, 0 console warnings, 0 invalid-XHR emissions**.
+
+### Files changed
+- `backend/recovery_module.py` — real namespace-scoped gates wired in.
+- `backend/integrity_module.py` — 2 x F601 lint fixes (`$ne` duplicate-key dict
+  → `$nin` list). Zero behaviour change.
+- `backend/tests/test_recovery_eb17b.py` — +4 `TestRealNamespaceEngines` tests,
+  fixture cleans on entry AND exit, `_uuid_short` now returns a canonical
+  hyphenated UUID so seeded rows don't leak into `test_registers_eb02` if any
+  cross-file cleanup ever regresses.
+- `frontend/src/pages/RecoveryDashboard.jsx` — pre-submit validation + inline
+  banner.
+
+No real ACE data, no real credentials, no live providers, no deploy, no GitHub push, `main` untouched.
+

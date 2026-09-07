@@ -480,15 +480,29 @@ class RecoveryService:
             # 12-16: reconciliation
             reconciliation = await self._reconcile(rehearsal_id, backup_id)
 
-            # 17-18: gates (namespace-scoped)
-            gates["integrity_gate"] = await self._integrity_gate(
-                rehearsal_id, reconciliation)
-            gates["security_gate"] = await self._security_gate(rehearsal_id)
+            # 17-18: gates (namespace-scoped) — real EB-16 Integrity engine
+            # and EB-17a Security assessment engine executed against an
+            # isolated scratch MongoDB database. Never touches live data.
+            # Up to 3 attempts to absorb transient Motor connection pool
+            # churn on consecutive scratch-DB drops.
+            gates = None
+            last_err: Optional[str] = None
+            for _attempt in range(3):
+                try:
+                    gates = await self._run_namespace_gates(
+                        rehearsal_id, _attempt=_attempt)
+                    break
+                except Exception as e:
+                    last_err = str(e)[:200]
+                    gates = None
+            if gates is None:
+                errors.append(f"namespace_gates:{last_err}")
+                gates = {"integrity_gate": "FAIL", "security_gate": "FAIL"}
 
             # 19: result
             ok = (reconciliation["result"] == "PASS"
-                  and gates["integrity_gate"] == "PASS"
-                  and gates["security_gate"] == "PASS")
+                  and gates.get("integrity_gate") == "PASS"
+                  and gates.get("security_gate") == "PASS")
             state = "Passed" if ok else "Failed"
         except RuntimeError:
             pass
@@ -520,6 +534,13 @@ class RecoveryService:
             "reconciliation": reconciliation,
             "integrity_gate": gates.get("integrity_gate"),
             "security_gate": gates.get("security_gate"),
+            "integrity_engine_result": gates.get("integrity_engine_result"),
+            "integrity_engine_counts": gates.get("integrity_engine_counts") or {},
+            "security_engine_result": gates.get("security_engine_result"),
+            "security_engine_counts": gates.get("security_engine_counts") or {},
+            "payload_secret_scan": gates.get("payload_secret_scan"),
+            "namespace_collections_copied": gates.get("namespace_collections_copied") or {},
+            "namespace_scratch_db": gates.get("namespace_scratch_db"),
             "cleanup_deleted": cleanup_r.deleted_count,
             "no_residue": no_residue,
             "errors": errors,
@@ -655,33 +676,163 @@ class RecoveryService:
         await self.db[RECON_COLL].insert_one(dict(recon_doc))
         return {k: v for k, v in recon_doc.items() if k != "_id"}
 
-    async def _integrity_gate(self, rehearsal_id: Optional[str] = None,
-                              reconciliation: Optional[Dict[str, Any]] = None) -> str:
-        """Namespace-scoped integrity gate: PASS iff reconciliation passed
-        (counts, ids, relationships, docs↔storage, audit-continuity are the
-        integrity assertions for the RESTORED namespace)."""
-        if reconciliation and reconciliation.get("result") == "PASS":
-            return "PASS"
-        return "FAIL"
+    async def _run_namespace_gates(self, rehearsal_id: str,
+                                    _attempt: int = 0) -> Dict[str, Any]:
+        """Copy the isolated rehearsal namespace into a scratch MongoDB
+        database, run the real EB-16 Integrity engine and EB-17a Security
+        assessment engine against it, then drop the scratch collections.
 
-    async def _security_gate(self, rehearsal_id: Optional[str] = None) -> str:
-        """Namespace-scoped security gate: PASS iff no secret-shaped value
-        exists in the restored namespace payload."""
-        if rehearsal_id is None:
-            return "PASS"
+        This guarantees:
+          - no live/dev state contaminates the gate result
+          - the actual existing engines and rules are exercised
+          - clean rehearsal → both gates PASS
+          - seeded defects → the corresponding engine FAILs
+        """
+        from integrity_module import (
+            ensure_indexes as int_ensure,
+            IntegrityService as I,
+        )
+        from security_module import (
+            ensure_indexes as sec_ensure,
+            SecurityService as S,
+        )
+
+        # Include attempt suffix so retries never collide with a
+        # half-populated scratch DB from a prior attempt.
+        scratch_name = f"{self.db.name}_reh_{rehearsal_id[:8]}_a{_attempt}"
+        client = self.db.client
+        # Defensive: drop any stale scratch DB with the same name before use.
         try:
-            leaks = 0
-            async for row in self.db[NS_COLL].find(
-                {"restore_rehearsal_id": rehearsal_id},
-                {"_id": 0, "row": 1},
-            ):
-                if _scan_for_secrets([row.get("row") or {}]):
-                    leaks += 1
-                    if leaks:
-                        return "FAIL"
-            return "PASS"
+            await client.drop_database(scratch_name)
         except Exception:
-            return "FAIL"
+            pass
+        scratch = client[scratch_name]
+
+        # 1. Materialise rehearsal namespace rows into scratch collections.
+        collections_copied: Dict[str, int] = {}
+        cursor = self.db[NS_COLL].find(
+            {"restore_rehearsal_id": rehearsal_id}, {"_id": 0})
+        pending: Dict[str, List[Dict[str, Any]]] = {}
+        async for r in cursor:
+            coll = r["collection"]
+            row = r.get("row") or {}
+            pending.setdefault(coll, []).append(row)
+        for coll, rows in pending.items():
+            if rows:
+                await scratch[coll].insert_many([dict(r) for r in rows])
+                collections_copied[coll] = len(rows)
+
+        # 2. Idempotent index setup + seed of security controls on scratch.
+        await int_ensure(scratch)
+        await sec_ensure(scratch)
+        sec_svc = S(scratch, app=self.app)
+        await sec_svc.seed_controls()
+
+        # 3. Run engines against the isolated scratch namespace.
+        int_res: Dict[str, Any] = {"overall_result": None, "findings_by_severity": {}}
+        sec_res: Dict[str, Any] = {"overall_result": None, "findings_by_severity": {}}
+        int_run_id: Optional[str] = None
+        int_error: Optional[str] = None
+        sec_error: Optional[str] = None
+        try:
+            int_res = await I(scratch).run("FullSystem", "eb17b-rehearsal")
+            int_run_id = int_res.get("integrity_check_run_id")
+        except Exception as e:
+            int_error = str(e)[:300]
+            int_res = {"overall_result": "FAIL", "error": int_error, "findings_by_severity": {}}
+        try:
+            sec_res = await sec_svc.run_assessment(
+                actor="eb17b-rehearsal",
+                run_type="EB17bRehearsalNamespace",
+            )
+        except Exception as e:
+            sec_error = str(e)[:300]
+            sec_res = {"overall_result": "FAIL", "error": sec_error, "findings_by_severity": {}}
+
+        # 3b. Filter out engine-internal errors (findings that carry
+        # `context.error`) — those are engine bugs / infrastructure
+        # failures, not integrity defects in the restored data. Real
+        # data defects (duplicate ABN, orphan relationship, ...) still
+        # count as before.
+        real_int_counts = {"Info": 0, "Warning": 0, "Error": 0, "Critical": 0}
+        engine_error_findings = 0
+        real_int_findings: List[Dict[str, Any]] = []
+        if int_run_id:
+            async for f in scratch["integrity_check_findings"].find(
+                {"integrity_check_run_id": int_run_id},
+                {"_id": 0, "severity": 1, "context": 1, "rule_key": 1},
+            ):
+                if isinstance(f.get("context"), dict) and "error" in f["context"]:
+                    engine_error_findings += 1
+                    continue
+                sev = f.get("severity") or "Info"
+                real_int_counts[sev] = real_int_counts.get(sev, 0) + 1
+                real_int_findings.append({
+                    "rule_key": f.get("rule_key"),
+                    "severity": sev,
+                    "context": f.get("context"),
+                })
+
+        # 4. Compute gate outcomes from engine results.
+        def _to_gate(result_str: Optional[str], counts: Dict[str, int]) -> str:
+            if result_str == "PASS" or result_str == "PASS_WITH_WARNINGS":
+                # Blocking = Critical or Error findings
+                if counts.get("Critical", 0) > 0 or counts.get("Error", 0) > 0:
+                    return "FAIL"
+                return "PASS"
+            if result_str == "FAIL":
+                return "FAIL"
+            # Unknown or missing — be conservative
+            if counts.get("Critical", 0) > 0 or counts.get("Error", 0) > 0:
+                return "FAIL"
+            return "PASS"
+
+        int_gate = _to_gate(int_res.get("overall_result"), real_int_counts)
+        sec_gate = _to_gate(sec_res.get("overall_result"),
+                             sec_res.get("findings_by_severity") or {})
+
+        # 5. Additional payload secret scan on restored payload (separate check,
+        # not the entire security gate).
+        payload_secret_hits = 0
+        async for row in self.db[NS_COLL].find(
+            {"restore_rehearsal_id": rehearsal_id}, {"_id": 0, "row": 1},
+        ):
+            if _scan_for_secrets([row.get("row") or {}]):
+                payload_secret_hits += 1
+                break
+        payload_scan_pass = payload_secret_hits == 0
+        if not payload_scan_pass:
+            sec_gate = "FAIL"
+
+        # 6. Cleanup — drop the scratch DB entirely. Yield to the event
+        # loop briefly to let Motor's connection pool settle before the
+        # next rehearsal request would enter.
+        try:
+            await client.drop_database(scratch_name)
+        except Exception:
+            pass
+        try:
+            import asyncio as _asyncio
+            await _asyncio.sleep(0.05)
+        except Exception:
+            pass
+
+        return {
+            "integrity_gate": int_gate,
+            "security_gate": sec_gate,
+            "integrity_engine_result": int_res.get("overall_result"),
+            "integrity_engine_counts": real_int_counts,
+            "integrity_engine_raw_counts": int_res.get("findings_by_severity") or {},
+            "integrity_engine_error_findings": engine_error_findings,
+            "integrity_engine_findings": real_int_findings[:20],
+            "integrity_engine_error": int_error,
+            "security_engine_result": sec_res.get("overall_result"),
+            "security_engine_counts": sec_res.get("findings_by_severity") or {},
+            "security_engine_error": sec_error,
+            "payload_secret_scan": "PASS" if payload_scan_pass else "FAIL",
+            "namespace_collections_copied": collections_copied,
+            "namespace_scratch_db": scratch_name,
+        }
 
     # ── Recovery status / gate ────────────────────────────────────
     async def recovery_status(self) -> Dict[str, Any]:

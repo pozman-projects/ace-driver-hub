@@ -351,7 +351,7 @@ class IntegrityService:
     async def _reg_duplicate_vin(self):
         pipeline = [
             {"$match": {"is_archived": {"$ne": True},
-                          "vin": {"$exists": True, "$ne": None, "$ne": ""}}},
+                          "vin": {"$exists": True, "$nin": [None, ""]}}},
             {"$group": {"_id": "$vin", "n": {"$sum": 1}}},
             {"$match": {"n": {"$gt": 1}}}]
         return [{"vin": r["_id"], "count": r["n"]}
@@ -380,7 +380,7 @@ class IntegrityService:
     async def _reg_duplicate_owner_abn(self):
         pipeline = [
             {"$match": {"is_archived": {"$ne": True},
-                          "abn": {"$exists": True, "$ne": None, "$ne": ""}}},
+                          "abn": {"$exists": True, "$nin": [None, ""]}}},
             {"$group": {"_id": "$abn", "n": {"$sum": 1}}},
             {"$match": {"n": {"$gt": 1}}}]
         return [{"abn": r["_id"], "count": r["n"]}

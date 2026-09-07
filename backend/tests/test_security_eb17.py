@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -461,3 +462,157 @@ class TestExceptionWorkflow:
         actions = [a["action"] for a in body["approvals"]]
         assert "Requested" in actions
         assert "Approved" in actions
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EB-17a expiry lifecycle — deterministic direct evidence
+# (Fictional local fixtures only; no external network; no conditional skips.)
+# ═══════════════════════════════════════════════════════════════════════
+class TestExceptionExpiryLifecycle:
+    """Proves the exception expiry contract end-to-end:
+      1. approved exception with elapsed TTL → status "Expired"
+      2. linked blocker/finding reactivates (control_key not suppressed)
+      3. expired exception no longer affects the security assessment result
+      4. requester self-approval remains denied
+    """
+
+    CONTROL_KEY = "auth.admin_password_not_default"
+
+    @pytest.fixture(autouse=True)
+    def _purge_prior_approvals(self):
+        """Ensure no leftover Approved/Pending exception from earlier test
+        classes suppresses our control during the lifecycle baseline."""
+        db_ = MongoClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+        db_["security_exception_requests"].delete_many(
+            {"control_key": self.CONTROL_KEY,
+             "status": {"$in": ["Approved", "Pending"]}})
+        yield
+
+    def _db(self):
+        return MongoClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+
+    def _create_and_approve(self, manager_headers, admin_headers):
+        r = requests.post(f"{API}/security/exceptions", headers=manager_headers, json={
+            "control_key": self.CONTROL_KEY,
+            "reason": "Deterministic expiry-lifecycle fixture (fictional).",
+            "risk_acknowledgement": "Ack: fictional test-only exception.",
+            "requested_days": 7,
+        }, timeout=30)
+        r.raise_for_status()
+        eid = r.json()["security_exception_request_id"]
+        requests.post(f"{API}/security/exceptions/{eid}/approve",
+                      headers=admin_headers, json={},
+                      timeout=30).raise_for_status()
+        return eid
+
+    def _back_date_expiry(self, eid: str):
+        """Set expires_at to one day in the past — the ONLY mutation the
+        test performs directly on Mongo, to simulate wall-clock elapse
+        without a sleep."""
+        past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        self._db()["security_exception_requests"].update_one(
+            {"security_exception_request_id": eid},
+            {"$set": {"expires_at": past}},
+        )
+
+    # 4. Requester self-approval denied (re-asserted at the top of the
+    # lifecycle so failure surfaces here if a regression flips it).
+    def test_requester_self_approval_denied(self, manager_headers):
+        r = requests.post(f"{API}/security/exceptions", headers=manager_headers, json={
+            "control_key": self.CONTROL_KEY,
+            "reason": "Same-actor approval attempt (fictional).",
+            "risk_acknowledgement": "Ack fictional.",
+            "requested_days": 3,
+        }, timeout=30)
+        r.raise_for_status()
+        eid = r.json()["security_exception_request_id"]
+        deny = requests.post(f"{API}/security/exceptions/{eid}/approve",
+                             headers=manager_headers, json={}, timeout=30)
+        assert deny.status_code == 403
+
+    # 1. Approved + elapsed TTL → "Expired"
+    def test_approved_with_elapsed_ttl_becomes_expired(self,
+                                                        manager_headers, admin_headers):
+        eid = self._create_and_approve(manager_headers, admin_headers)
+        self._back_date_expiry(eid)
+        # invoke sweep
+        r = requests.post(f"{API}/security/exceptions/expire-due",
+                          headers=admin_headers, timeout=30)
+        assert r.status_code == 200
+        body = r.json()
+        assert eid in body["expired"]
+        # verify persisted state
+        db_ = self._db()
+        row = db_["security_exception_requests"].find_one(
+            {"security_exception_request_id": eid}, {"_id": 0})
+        assert row["status"] == "Expired"
+        assert row.get("expired_at") is not None
+        # append-only audit row exists
+        actions = list(db_["security_exception_approvals"].find(
+            {"security_exception_request_id": eid}, {"_id": 0, "action": 1}))
+        assert any(a["action"] == "Expired" for a in actions)
+
+    # 2. Expiry reactivates the linked blocker/finding
+    #    (control_key is no longer suppressed in the next assessment)
+    def test_expiry_reactivates_linked_blocker(self,
+                                                 manager_headers, admin_headers):
+        # Baseline assessment
+        run0 = requests.post(f"{API}/security/assessments", headers=admin_headers,
+                             json={}, timeout=60).json()
+        finds0 = requests.get(
+            f"{API}/security/assessments/{run0['security_assessment_run_id']}/findings",
+            headers=admin_headers,
+            params={"control_key": self.CONTROL_KEY}, timeout=30).json()
+        baseline_open = [f for f in finds0 if f["status"] == "Open"]
+        assert baseline_open, \
+            f"Fixture control {self.CONTROL_KEY} must currently produce a finding"
+
+        # Approve exception; new assessment → finding suppressed
+        eid = self._create_and_approve(manager_headers, admin_headers)
+        run1 = requests.post(f"{API}/security/assessments", headers=admin_headers,
+                             json={}, timeout=60).json()
+        finds1 = requests.get(
+            f"{API}/security/assessments/{run1['security_assessment_run_id']}/findings",
+            headers=admin_headers,
+            params={"control_key": self.CONTROL_KEY}, timeout=30).json()
+        suppressed = [f for f in finds1 if f["status"] == "Suppressed"]
+        assert suppressed, "Approved exception must suppress the linked finding"
+        assert suppressed[0]["suppressed_by_exception_id"] == eid
+
+        # Expire the exception; new assessment → finding OPEN again
+        self._back_date_expiry(eid)
+        requests.post(f"{API}/security/exceptions/expire-due",
+                      headers=admin_headers, timeout=30).raise_for_status()
+        run2 = requests.post(f"{API}/security/assessments", headers=admin_headers,
+                             json={}, timeout=60).json()
+        finds2 = requests.get(
+            f"{API}/security/assessments/{run2['security_assessment_run_id']}/findings",
+            headers=admin_headers,
+            params={"control_key": self.CONTROL_KEY}, timeout=30).json()
+        reactivated = [f for f in finds2 if f["status"] == "Open"]
+        assert reactivated, "Expired exception must reactivate the blocker/finding"
+
+    # 3. Expired exception no longer affects assessment overall_result
+    def test_expired_exception_no_longer_affects_result(self,
+                                                          manager_headers, admin_headers):
+        # Baseline (no active exception on our control)
+        base = requests.post(f"{API}/security/assessments", headers=admin_headers,
+                             json={}, timeout=60).json()
+        base_counts = base["findings_by_severity"]
+        base_result = base["overall_result"]
+
+        # Approve exception → suppresses control → non-zero suppressed count
+        eid = self._create_and_approve(manager_headers, admin_headers)
+        active = requests.post(f"{API}/security/assessments", headers=admin_headers,
+                               json={}, timeout=60).json()
+        assert active["suppressed_count"] >= 1
+
+        # Expire → next run must match baseline severity distribution
+        self._back_date_expiry(eid)
+        requests.post(f"{API}/security/exceptions/expire-due",
+                      headers=admin_headers, timeout=30).raise_for_status()
+        after = requests.post(f"{API}/security/assessments", headers=admin_headers,
+                              json={}, timeout=60).json()
+        assert after["overall_result"] == base_result
+        assert after["findings_by_severity"] == base_counts
+        assert after["suppressed_count"] == 0

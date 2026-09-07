@@ -845,6 +845,21 @@ class SecurityService:
             pass
         return findings
 
+    async def _active_exception_control_keys(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Return {control_key: [approved-non-expired exception rows]} for
+        every currently-active suppression. An exception is "active" iff
+        status="Approved" AND (expires_at is None OR expires_at > now)."""
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        now = _iso()
+        cursor = self.db[EXC_REQ_COLL].find(
+            {"status": "Approved",
+             "$or": [{"expires_at": None},
+                     {"expires_at": {"$gt": now}}]},
+            {"_id": 0})
+        async for row in cursor:
+            out.setdefault(row["control_key"], []).append(row)
+        return out
+
     # ── Assessment run ────────────────────────────────────────────
     async def run_assessment(
         self,
@@ -879,6 +894,16 @@ class SecurityService:
         findings += await self._check_privacy()
         findings += await self._check_audit()
 
+        # ── Suppression pass — apply active approved exceptions ───────
+        active_map = await self._active_exception_control_keys()
+        for f in findings:
+            excs = active_map.get(f["control_key"], [])
+            if excs:
+                f["status"] = "Suppressed"
+                f["suppressed_by_exception_id"] = excs[0]["security_exception_request_id"]
+            else:
+                f["status"] = "Open"
+
         # Persist configuration snapshot
         snap_doc = {
             "security_configuration_snapshot_id": _uuid(),
@@ -897,7 +922,8 @@ class SecurityService:
                 "security_assessment_run_id": run_id,
                 "control_key": f["control_key"],
                 "severity": f["severity"],
-                "status": "Open",
+                "status": f["status"],
+                "suppressed_by_exception_id": f.get("suppressed_by_exception_id"),
                 "message": f["message"],
                 "context": f.get("context", {}),
                 "created_at": _iso(),
@@ -907,10 +933,13 @@ class SecurityService:
         if finding_docs:
             await self.db[FIND_COLL].insert_many([dict(d) for d in finding_docs])
 
-        overall = _overall_result(findings)
+        # Effective (non-suppressed) findings drive overall_result and counts.
+        effective = [f for f in findings if f["status"] == "Open"]
+        overall = _overall_result(effective)
         counts = {"Info": 0, "Warning": 0, "Error": 0, "Critical": 0}
-        for f in findings:
+        for f in effective:
             counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+        suppressed_count = sum(1 for f in findings if f["status"] == "Suppressed")
 
         run_doc = {
             "security_assessment_run_id": run_id,
@@ -921,14 +950,16 @@ class SecurityService:
             "actor": actor,
             "overall_result": overall,
             "findings_by_severity": counts,
-            "findings_count": len(findings),
+            "findings_count": len(effective),
+            "suppressed_count": suppressed_count,
             "route_count": len(inv),
             "security_configuration_snapshot_id": snap_doc["security_configuration_snapshot_id"],
             "_source": "seed-eb17a",
         }
         await self.db[RUN_COLL].insert_one(dict(run_doc))
         await self._log_event("assessment.run", {"security_assessment_run_id": run_id},
-                              actor, {"overall": overall, "counts": counts})
+                              actor, {"overall": overall, "counts": counts,
+                                      "suppressed": suppressed_count})
         return _strip(run_doc)
 
     async def status_summary(self) -> Dict[str, Any]:

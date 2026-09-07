@@ -608,7 +608,7 @@ def build_documents_router(db, get_current_user):
             ).to_list(2000)
             ids = [x["document_id"] for x in links]
             q["id"] = {"$in": ids} if ids else {"$in": ["__none__"]}
-        docs = await db[DOCUMENTS_COLL].find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+        docs = await db[DOCUMENTS_COLL].find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
         # Filter by sensitivity visibility (list is always allowed metadata-wise)
         return [_strip_storage(d) for d in docs]
 

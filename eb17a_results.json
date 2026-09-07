@@ -1,0 +1,149 @@
+{
+  "checkpoints": [
+    [
+      "Header title Security Control Centre",
+      true
+    ],
+    [
+      "tile-overall visible",
+      true
+    ],
+    [
+      "tile-controls visible",
+      true
+    ],
+    [
+      "tile-findings visible",
+      true
+    ],
+    [
+      "tile-exceptions visible",
+      true
+    ],
+    [
+      "No hscroll @1920x1080 body=1920 win=1920",
+      true
+    ],
+    [
+      "tab-overview \u2192 overview-panel",
+      true
+    ],
+    [
+      "tab-controls \u2192 controls-panel",
+      true
+    ],
+    [
+      "controls >=19 cards (got 19)",
+      true
+    ],
+    [
+      "tab-findings \u2192 findings-panel",
+      true
+    ],
+    [
+      "tab-matrix \u2192 matrix-panel",
+      true
+    ],
+    [
+      "matrix >100 rows (got 393)",
+      true
+    ],
+    [
+      "tab-data \u2192 data-panel",
+      true
+    ],
+    [
+      "data-panel PII rows (got 13)",
+      true
+    ],
+    [
+      "tab-audit \u2192 audit-panel",
+      true
+    ],
+    [
+      "audit-worst badge visible",
+      true
+    ],
+    [
+      "tab-exceptions \u2192 exceptions-panel",
+      true
+    ],
+    [
+      "btn-run-assessment: findings tile updated within 10s",
+      false
+    ],
+    [
+      "Exceptions empty-state = False",
+      true
+    ],
+    [
+      "Client-side error toast on short reason",
+      true
+    ],
+    [
+      "No network POST /security/exceptions on invalid submit",
+      true
+    ],
+    [
+      "Toast 'Exception request submitted'",
+      true
+    ],
+    [
+      "No hscroll @1440x900 body=1440 win=1440",
+      true
+    ],
+    [
+      "ReadOnly: /administration/security loads with header",
+      true
+    ],
+    [
+      "ReadOnly: btn-run-assessment NOT rendered",
+      true
+    ],
+    [
+      "ReadOnly: btn-new-exception NOT rendered",
+      true
+    ],
+    [
+      "ReadOnly: config panel shows 'Manager or Admin required to view configuration.'",
+      true
+    ],
+    [
+      "ReadOnly: tile-overall visible",
+      true
+    ],
+    [
+      "ReadOnly: tile-controls visible",
+      true
+    ],
+    [
+      "ReadOnly: tile-findings visible",
+      true
+    ],
+    [
+      "ReadOnly: tile-exceptions visible",
+      true
+    ],
+    [
+      "ReadOnly: controls-panel visible",
+      true
+    ],
+    [
+      "ReadOnly: matrix-panel visible",
+      false
+    ],
+    [
+      "ReadOnly: data-panel visible",
+      false
+    ]
+  ],
+  "console_errors": [
+    "In HTML, %s cannot be a child of <%s>.%s\nThis will cause a hydration error.%s <span> option  \n\n  ...\n    <BrowserRouter x-file-name=\"App\" x-line-number=\"51\" x-column=\"8\" x-component=\"BrowserRouter\" x-",
+    "Failed to load resource: the server responded with a status of 403 ()",
+    "Failed to load resource: the server responded with a status of 403 ()",
+    "Failed to load resource: the server responded with a status of 403 ()"
+  ],
+  "console_warnings": [],
+  "passed": 31,
+  "total": 34
+}

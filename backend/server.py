@@ -371,8 +371,8 @@ async def seed_sample_data():
             {"driver_name": "Noah Williams", "licence_number": "QLD-3456789", "licence_class": "HC", "issue_date": "2020-09-20", "expiry_date": "2025-09-20", "status": "Expiring Soon"},
         ],
         "truck-rego": [
-            {"rego_number": "ACE-001", "driver_name": "James Carter", "make": "Kenworth", "model": "T610", "year": "2021", "expiry_date": "2026-08-12"},
-            {"rego_number": "ACE-002", "driver_name": "Liam O'Brien", "make": "Volvo", "model": "FH16", "year": "2022", "expiry_date": "2026-11-30"},
+            {"rego_number": "ACE-001", "driver_name": "James Carter", "make": "Kenworth", "model": "T610", "year": "2021", "expiry_date": "2030-08-12"},
+            {"rego_number": "ACE-002", "driver_name": "Liam O'Brien", "make": "Volvo", "model": "FH16", "year": "2022", "expiry_date": "2030-11-30"},
         ],
         "insurance": [
             {"policy_number": "POL-887766", "driver_name": "James Carter", "provider": "NTI", "type": "Comprehensive", "expiry_date": "2026-04-30", "premium": "$4,200"},

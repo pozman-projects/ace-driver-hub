@@ -20,13 +20,13 @@ const SEVERITY_COLOR = {
 };
 
 const TABS = [
-  { key: "overview", label: "Overview" },
-  { key: "controls", label: "Controls" },
-  { key: "findings", label: "Assessment Findings" },
-  { key: "matrix", label: "Permission Matrix" },
-  { key: "data", label: "Data Classification" },
-  { key: "audit", label: "Audit Integrity" },
-  { key: "exceptions", label: "Exceptions" },
+  { key: "overview", label: "Overview", roles: null },
+  { key: "controls", label: "Controls", roles: null },
+  { key: "findings", label: "Assessment Findings", roles: null },
+  { key: "matrix", label: "Permission Matrix", roles: ["Compliance", "Manager", "Admin"] },
+  { key: "data", label: "Data Classification", roles: ["Compliance", "Manager", "Admin"] },
+  { key: "audit", label: "Audit Integrity", roles: ["Compliance", "Manager", "Admin"] },
+  { key: "exceptions", label: "Exceptions", roles: ["Compliance", "Manager", "Admin"] },
 ];
 
 export default function SecurityControlCentre() {
@@ -84,17 +84,17 @@ export default function SecurityControlCentre() {
   }, [selectedRun]);
 
   useEffect(() => {
-    if (tab === "matrix" && !permMatrix) {
+    if (tab === "matrix" && !permMatrix && canApprove) {
       api.get("/security/permission-matrix")
         .then((r) => setPermMatrix(r.data))
         .catch((e) => toast.error(formatApiErrorDetail(e?.response?.data?.detail)));
     }
-    if (tab === "data" && !classification) {
+    if (tab === "data" && !classification && canApprove) {
       api.get("/security/data-classification")
         .then((r) => setClassification(r.data))
         .catch((e) => toast.error(formatApiErrorDetail(e?.response?.data?.detail)));
     }
-    if (tab === "audit" && !audit) {
+    if (tab === "audit" && !audit && canApprove) {
       api.get("/security/audit-integrity")
         .then((r) => setAudit(r.data))
         .catch((e) => toast.error(formatApiErrorDetail(e?.response?.data?.detail)));
@@ -104,12 +104,12 @@ export default function SecurityControlCentre() {
         .then((r) => setConfig(r.data))
         .catch(() => setConfig(null));
     }
-    if (tab === "exceptions") {
+    if (tab === "exceptions" && canApprove) {
       api.get("/security/exceptions")
         .then((r) => setExceptions(r.data || []))
         .catch((e) => toast.error(formatApiErrorDetail(e?.response?.data?.detail)));
     }
-  }, [tab, permMatrix, classification, audit, config, canRun]);
+  }, [tab, permMatrix, classification, audit, config, canRun, canApprove]);
 
   const runAssessment = async () => {
     setBusy("run");
@@ -228,7 +228,7 @@ export default function SecurityControlCentre() {
 
         {/* Tabs */}
         <div className="flex gap-1 mb-4 border-b border-slate-200" data-testid="security-tabs">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !t.roles || t.roles.includes(user?.role)).map((t) => (
             <button
               key={t.key}
               data-testid={`tab-${t.key}`}

@@ -1288,3 +1288,17 @@ Parts 1–9 delivered — **backend suite: 589 passed / 1 skipped / 0 failed** (
 - ✅ No preview URLs in EB-17a tests; local-only.
 - ✅ No conditional skips in `test_security_eb17.py`.
 - ✅ No live cron, no real providers, no GitHub push, `main` untouched.
+
+---
+
+## EB-17b — Backup / Restore / DR / RPO-RTO (Feb 2026) ✅ COMPLETE
+
+Parts 1–15 delivered — backend targeted suite 34/34 PASS.
+
+- `backend/recovery_module.py` (+ `recovery_service.py` facade) — provider-neutral backup framework; SHA-256 manifest & per-artifact checksums; isolated-namespace restore rehearsals; deterministic reconciliation (counts / identifiers / relationships / documents↔storage / audit-continuity); RPO/RTO configuration with `production_approved: false` fence; recovery readiness gate at `GET /api/recovery/gate`.
+- 9 new collections (`backup_definitions`, `backup_runs`, `backup_artifacts`, `backup_manifests`, `restore_rehearsals`, `restore_reconciliation_results`, `recovery_events`, `recovery_configuration`, `restore_namespace_data`).
+- 11 new API routes under `/api/recovery/*` + `/api/backups*` (RBAC: ReadOnly summary, Compliance read, Manager validate, Admin mutate).
+- `frontend/src/pages/RecoveryDashboard.jsx` at `/administration/recovery` — 6 tabs (Overview, Backups, Restore Rehearsals, Reconciliation, RPO/RTO, Recovery Gate), fictional-marker banner, no colour-only status. Hub tile added.
+- 4 runbooks under `/app/memory/EB-17b-*.md`; `VERSION` → `dcc-phase2-eb17b`.
+
+No real ACE data, no real credentials, no live providers, no deploy, no GitHub push, `main` untouched.

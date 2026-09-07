@@ -569,6 +569,9 @@ async def on_startup():
     )
     await sec_ensure_indexes(db)
     await EB17SecurityService(db, app=app).seed_controls()
+    # --- EB-17b Recovery / Backup / DR ---
+    from recovery_module import ensure_indexes as rec_ensure_indexes
+    await rec_ensure_indexes(db)
 
 
 # Include router and CORS
@@ -643,6 +646,10 @@ app.include_router(build_integrity_router(db, get_current_user))
 # --- EB-17a Security Foundation ---
 from security_module import build_security_router  # noqa: E402
 app.include_router(build_security_router(db, app, get_current_user))
+
+# --- EB-17b Recovery / Backup / DR ---
+from recovery_module import build_recovery_router  # noqa: E402
+app.include_router(build_recovery_router(db, app, get_current_user))
 
 app.add_middleware(
     CORSMiddleware,

@@ -384,6 +384,20 @@ export default function Hub() {
               </div>
               <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
             </Link>
+            <Link
+              to="/administration/recovery"
+              data-testid="recovery-hub-card"
+              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+            >
+              <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                <ArrowsDownUp size={20} weight="regular" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Recovery & Backup</div>
+                <div className="text-[11px] text-slate-500 truncate">Backup, restore, DR rehearsal, RPO/RTO.</div>
+              </div>
+              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+            </Link>
           </div>
         </section>
         <section className="mb-4" data-testid="canonical-compliance-section">

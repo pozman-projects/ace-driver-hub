@@ -478,7 +478,7 @@ class IntegrityService:
             {"status": {"$in": ["Compliant", "compliant"]},
               "expiry_date": {"$lt": _iso()},
               "is_archived": {"$ne": True}},
-            {"_id": 0, "id": 1, "compliance_type": 1, "expiry_date": 1}).limit(200)
+            {"_id": 0, "id": 1, "compliance_type": 1, "expiry_date": 1}).to_list(200)
         return rows
 
     async def _cmp_under_review_accepted(self):
@@ -486,7 +486,7 @@ class IntegrityService:
             {"status": {"$in": ["Under Review", "under_review"]},
               "verification_status": {"$in": ["Accepted", "Approved"]},
               "is_archived": {"$ne": True}},
-            {"_id": 0, "id": 1, "compliance_type": 1}).limit(200)
+            {"_id": 0, "id": 1, "compliance_type": 1}).to_list(200)
         return rows
 
     async def _cmp_missing_evidence_accepted(self):
@@ -498,13 +498,13 @@ class IntegrityService:
                 {"is_archived": {"$ne": True}},
                 {"_source": {"$regex": "eb16"}},  # only rehearsal-seeded rows
             ]},
-            {"_id": 0, "id": 1, "compliance_type": 1}).limit(200)
+            {"_id": 0, "id": 1, "compliance_type": 1}).to_list(200)
         return rows
 
     async def _cmp_archived_used_as_current(self):
         rows = await self.db["equipment_compliance_records"].find(
             {"is_current": True, "is_archived": True},
-            {"_id": 0, "id": 1, "compliance_type": 1}).limit(200)
+            {"_id": 0, "id": 1, "compliance_type": 1}).to_list(200)
         return rows
 
     async def _cmp_summary_component_mismatch(self):
@@ -551,7 +551,7 @@ class IntegrityService:
             {"status": {"$in": ["Activated", "activated"]},
               "readiness_status": {"$nin": ["Ready", "Ready with Override"]}},
             {"_id": 0, "driver_activation_id": 1, "driver_id": 1,
-              "readiness_status": 1}).limit(200)
+              "readiness_status": 1}).to_list(200)
         return rows
 
     async def _act_missing_mandatory_but_ready(self):
@@ -559,7 +559,7 @@ class IntegrityService:
             {"readiness_status": "Ready",
               "outstanding_mandatory_count": {"$gt": 0}},
             {"_id": 0, "driver_activation_id": 1,
-              "outstanding_mandatory_count": 1}).limit(200)
+              "outstanding_mandatory_count": 1}).to_list(200)
         return rows
 
     async def _act_counts_not_reconciling(self):
@@ -583,7 +583,7 @@ class IntegrityService:
             {"status": {"$in": ["Active", "active"]},
               "expires_at": {"$lt": _iso()},
               "is_archived": {"$ne": True}},
-            {"_id": 0, "activation_override_id": 1}).limit(200)
+            {"_id": 0, "activation_override_id": 1}).to_list(200)
         return rows
 
     async def _act_archived_driver_activated(self): return []
@@ -596,7 +596,7 @@ class IntegrityService:
         rows = await self.db["storage_reconciliation_runs"].find(
             {"checksum_failure_count": {"$gt": 0}},
             {"_id": 0, "storage_reconciliation_run_id": 1,
-              "checksum_failure_count": 1}).limit(20)
+              "checksum_failure_count": 1}).to_list(20)
         return rows
 
     async def _doc_raw_path_exposed(self): return []
@@ -633,7 +633,7 @@ class IntegrityService:
                                                   "sg-401", "tw-401", "tw-400"]},
                   "delivery_status": "Retry Scheduled"},
                 {"_id": 0, "notification_delivery_id": 1,
-                  "last_failure_code": 1}).limit(50)
+                  "last_failure_code": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -646,7 +646,7 @@ class IntegrityService:
                   "last_failure_code": {"$nin": ["invalid_recipient", "auth",
                                                     "sg-401", "tw-401", "tw-400"]}},
                 {"_id": 0, "notification_delivery_id": 1,
-                  "attempts_made": 1}).limit(50)
+                  "attempts_made": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -656,7 +656,7 @@ class IntegrityService:
             rows = await self.db["scheduled_job_runs"].find(
                 {"status": "Running", "started_at": {"$lt": cutoff}},
                 {"_id": 0, "scheduled_job_run_id": 1,
-                  "job_key": 1, "started_at": 1}).limit(50)
+                  "job_key": 1, "started_at": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -664,7 +664,7 @@ class IntegrityService:
         try:
             rows = await self.db["scheduled_job_locks"].find(
                 {"expires_at": {"$lt": _iso()}},
-                {"_id": 0, "scheduled_job_lock_id": 1, "job_key": 1}).limit(50)
+                {"_id": 0, "scheduled_job_lock_id": 1, "job_key": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -679,7 +679,7 @@ class IntegrityService:
                   "$or": [{"reconciliation_status": None},
                             {"reconciliation_status": {"$exists": False}}]},
                 {"_id": 0, "migration_commit_job_id": 1,
-                  "name": 1}).limit(50)
+                  "name": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -689,7 +689,7 @@ class IntegrityService:
                 {"status": {"$in": ["Completed", "Running", "Preflight", "Committing"]},
                   "$or": [{"migration_approval_id": None},
                             {"migration_approval_id": {"$exists": False}}]},
-                {"_id": 0, "migration_commit_job_id": 1}).limit(50)
+                {"_id": 0, "migration_commit_job_id": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -699,7 +699,7 @@ class IntegrityService:
                 {"status": {"$in": ["Completed", "Running", "Committing"]},
                   "$or": [{"rollback_package_id": None},
                             {"rollback_package_id": {"$exists": False}}]},
-                {"_id": 0, "migration_commit_job_id": 1}).limit(50)
+                {"_id": 0, "migration_commit_job_id": 1}).to_list(50)
             return rows
         except Exception: return []
 
@@ -724,7 +724,7 @@ class IntegrityService:
                 {"mode": {"$in": ["Real", "real", "PROD", "production"]},
                   "$or": [{"authorisation_marker": None},
                             {"authorisation_marker": {"$exists": False}}]},
-                {"_id": 0, "migration_commit_job_id": 1}).limit(20)
+                {"_id": 0, "migration_commit_job_id": 1}).to_list(20)
             return rows
         except Exception: return []
 
@@ -818,6 +818,12 @@ class IntegrityService:
             rules_evaluated += 1
             detector = getattr(self, self.DETECTORS.get(rule.rule_key, ""), None)
             try:
+                # Fault-injection hook — used ONLY by EB-17b close-out
+                # tests to prove that a detector execution error forces
+                # integrity_gate=FAIL. Never set in production.
+                _fault = os.environ.get("EB17B_FAULT_INJECT_RULE")
+                if _fault and _fault == rule.rule_key:
+                    raise RuntimeError("forced-detector-failure-eb17b-test")
                 triggers = await detector() if detector else []
             except Exception as e:  # noqa: BLE001
                 triggers = [{"error": str(e)[:200]}]

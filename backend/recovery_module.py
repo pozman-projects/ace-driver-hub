@@ -433,7 +433,8 @@ class RecoveryService:
 
     # ── Restore rehearsal (isolated namespace) ────────────────────
     async def start_rehearsal(self, backup_id: str, actor: str, actor_role: str,
-                              approved: bool = True) -> Dict[str, Any]:
+                              approved: bool = True,
+                              fault_inject_rule: Optional[str] = None) -> Dict[str, Any]:
         if not approved:
             raise HTTPException(status_code=400,
                                 detail="Restore requires explicit approval.")
@@ -490,7 +491,8 @@ class RecoveryService:
             for _attempt in range(3):
                 try:
                     gates = await self._run_namespace_gates(
-                        rehearsal_id, _attempt=_attempt)
+                        rehearsal_id, _attempt=_attempt,
+                        fault_inject_rule=fault_inject_rule)
                     break
                 except Exception as e:
                     last_err = str(e)[:200]
@@ -536,6 +538,9 @@ class RecoveryService:
             "security_gate": gates.get("security_gate"),
             "integrity_engine_result": gates.get("integrity_engine_result"),
             "integrity_engine_counts": gates.get("integrity_engine_counts") or {},
+            "integrity_engine_error_findings": gates.get("integrity_engine_error_findings") or 0,
+            "integrity_engine_error_rules": gates.get("integrity_engine_error_rules") or [],
+            "integrity_engine_detectors_executed": gates.get("integrity_engine_detectors_executed") or 0,
             "security_engine_result": gates.get("security_engine_result"),
             "security_engine_counts": gates.get("security_engine_counts") or {},
             "payload_secret_scan": gates.get("payload_secret_scan"),
@@ -677,7 +682,8 @@ class RecoveryService:
         return {k: v for k, v in recon_doc.items() if k != "_id"}
 
     async def _run_namespace_gates(self, rehearsal_id: str,
-                                    _attempt: int = 0) -> Dict[str, Any]:
+                                    _attempt: int = 0,
+                                    fault_inject_rule: Optional[str] = None) -> Dict[str, Any]:
         """Copy the isolated rehearsal namespace into a scratch MongoDB
         database, run the real EB-16 Integrity engine and EB-17a Security
         assessment engine against it, then drop the scratch collections.
@@ -734,28 +740,42 @@ class RecoveryService:
         int_run_id: Optional[str] = None
         int_error: Optional[str] = None
         sec_error: Optional[str] = None
+        # Test-only fault injection: set the env var read by
+        # `IntegrityService.run` for the DURATION of this rehearsal only.
+        _prev_fault = os.environ.get("EB17B_FAULT_INJECT_RULE")
+        if fault_inject_rule:
+            os.environ["EB17B_FAULT_INJECT_RULE"] = fault_inject_rule
         try:
-            int_res = await I(scratch).run("FullSystem", "eb17b-rehearsal")
-            int_run_id = int_res.get("integrity_check_run_id")
-        except Exception as e:
-            int_error = str(e)[:300]
-            int_res = {"overall_result": "FAIL", "error": int_error, "findings_by_severity": {}}
-        try:
-            sec_res = await sec_svc.run_assessment(
-                actor="eb17b-rehearsal",
-                run_type="EB17bRehearsalNamespace",
-            )
-        except Exception as e:
-            sec_error = str(e)[:300]
-            sec_res = {"overall_result": "FAIL", "error": sec_error, "findings_by_severity": {}}
+            try:
+                int_res = await I(scratch).run("FullSystem", "eb17b-rehearsal")
+                int_run_id = int_res.get("integrity_check_run_id")
+            except Exception as e:
+                int_error = str(e)[:300]
+                int_res = {"overall_result": "FAIL", "error": int_error, "findings_by_severity": {}}
+            try:
+                sec_res = await sec_svc.run_assessment(
+                    actor="eb17b-rehearsal",
+                    run_type="EB17bRehearsalNamespace",
+                )
+            except Exception as e:
+                sec_error = str(e)[:300]
+                sec_res = {"overall_result": "FAIL", "error": sec_error, "findings_by_severity": {}}
+        finally:
+            # Restore prior env var state so no cross-request bleed.
+            if fault_inject_rule:
+                if _prev_fault is None:
+                    os.environ.pop("EB17B_FAULT_INJECT_RULE", None)
+                else:
+                    os.environ["EB17B_FAULT_INJECT_RULE"] = _prev_fault
 
-        # 3b. Filter out engine-internal errors (findings that carry
-        # `context.error`) — those are engine bugs / infrastructure
-        # failures, not integrity defects in the restored data. Real
-        # data defects (duplicate ABN, orphan relationship, ...) still
-        # count as before.
+        # 3b. Separate real data defects from engine execution errors.
+        # A finding whose `context.error` is set is an EB-16 detector
+        # execution failure (not a data defect). Per EB-17b Final
+        # Integrity Close-out: any engine execution failure must force
+        # integrity_gate = FAIL. It MUST NOT be suppressed or filtered.
         real_int_counts = {"Info": 0, "Warning": 0, "Error": 0, "Critical": 0}
         engine_error_findings = 0
+        engine_error_rules: List[str] = []
         real_int_findings: List[Dict[str, Any]] = []
         if int_run_id:
             async for f in scratch["integrity_check_findings"].find(
@@ -764,6 +784,9 @@ class RecoveryService:
             ):
                 if isinstance(f.get("context"), dict) and "error" in f["context"]:
                     engine_error_findings += 1
+                    rk = f.get("rule_key")
+                    if rk and rk not in engine_error_rules:
+                        engine_error_rules.append(rk)
                     continue
                 sev = f.get("severity") or "Info"
                 real_int_counts[sev] = real_int_counts.get(sev, 0) + 1
@@ -772,6 +795,11 @@ class RecoveryService:
                     "severity": sev,
                     "context": f.get("context"),
                 })
+
+        # 3c. Read the number of integrity detectors actually executed
+        # against the scratch namespace. Provides "engine health"
+        # evidence in the rehearsal record.
+        int_detectors_executed = int(int_res.get("rules_evaluated") or 0)
 
         # 4. Compute gate outcomes from engine results.
         def _to_gate(result_str: Optional[str], counts: Dict[str, int]) -> str:
@@ -788,6 +816,11 @@ class RecoveryService:
             return "PASS"
 
         int_gate = _to_gate(int_res.get("overall_result"), real_int_counts)
+        # HARD RULE (EB-17b Final Integrity Close-out): any EB-16 detector
+        # execution error (Motor/cursor/DB failure) → integrity gate CANNOT
+        # PASS. This is not a filter — the run itself is untrusted.
+        if engine_error_findings > 0 or int_error is not None:
+            int_gate = "FAIL"
         sec_gate = _to_gate(sec_res.get("overall_result"),
                              sec_res.get("findings_by_severity") or {})
 
@@ -824,6 +857,8 @@ class RecoveryService:
             "integrity_engine_counts": real_int_counts,
             "integrity_engine_raw_counts": int_res.get("findings_by_severity") or {},
             "integrity_engine_error_findings": engine_error_findings,
+            "integrity_engine_error_rules": engine_error_rules,
+            "integrity_engine_detectors_executed": int_detectors_executed,
             "integrity_engine_findings": real_int_findings[:20],
             "integrity_engine_error": int_error,
             "security_engine_result": sec_res.get("overall_result"),
@@ -987,6 +1022,12 @@ class CreateBackupBody(BaseModel):
 class StartRehearsalBody(BaseModel):
     backup_run_id: str
     approved: bool = True
+    # Test-only: force one EB-16 integrity detector to raise inside the
+    # scratch namespace run. Used exclusively by EB-17b Final Integrity
+    # Close-out tests to prove that any detector execution error forces
+    # integrity_gate=FAIL. Ignored unless running against fictional
+    # seed-eb17b data (never set by real callers or the UI).
+    fault_inject_rule: Optional[str] = None
 
 
 def build_recovery_router(db, app, get_current_user):
@@ -1045,7 +1086,8 @@ def build_recovery_router(db, app, get_current_user):
         return await svc.start_rehearsal(body.backup_run_id,
                                           current.get("email"),
                                           current.get("role"),
-                                          approved=body.approved)
+                                          approved=body.approved,
+                                          fault_inject_rule=body.fault_inject_rule)
 
     @r.get("/api/recovery/rehearsals")
     async def list_reh(current=Depends(get_current_user)):

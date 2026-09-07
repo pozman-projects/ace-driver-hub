@@ -1360,3 +1360,86 @@ Two defects from the initial EB-17b delivery closed.
 
 No real ACE data, no real credentials, no live providers, no deploy, no GitHub push, `main` untouched.
 
+
+
+## EB-17b Final Integrity Close-out (Feb 2026) ✅ COMPLETE
+
+Removes the last integrity-gate compromise from EB-17b: engine execution
+errors are no longer tolerated. Every applicable EB-16 detector must execute
+successfully against the isolated rehearsal scratch database — anything less
+blocks the gate.
+
+### Fixed
+- **Motor/cursor compatibility in EB-16 detectors** — replaced trailing
+  `.limit(N)` (which returned an awaited cursor, always raising
+  `object AsyncIOMotorCursor can't be used in 'await' expression`) with
+  `.to_list(N)` across the 8 previously-broken detectors:
+  `cmp.expired_marked_compliant`, `cmp.under_review_accepted`,
+  `cmp.missing_evidence_accepted`, `cmp.archived_used_as_current`,
+  `act.activated_not_ready`, `act.expired_override_active`,
+  `act.missing_mandatory_but_ready`, `doc.checksum_mismatch`, plus 7 more
+  in the notification / scheduler / migration domains that were silently
+  returning `[]`. All 60 applicable detectors now execute successfully on a
+  clean scratch namespace.
+
+- **Hard rule enforced in `_run_namespace_gates`** — if
+  `engine_error_findings > 0` OR the top-level engine call raised, then
+  `integrity_gate` is FORCED to `FAIL`. Nothing is suppressed, downgraded,
+  or filtered out; the failed detector rule keys are recorded on the
+  rehearsal record.
+
+- **New rehearsal record fields** (all indexable audit evidence):
+  `integrity_engine_detectors_executed`,
+  `integrity_engine_error_findings`,
+  `integrity_engine_error_rules` (list of failing detector rule_keys),
+  in addition to the fields introduced in the initial close-out.
+
+- **Fault-injection hook** (`EB17B_FAULT_INJECT_RULE` env var, driven by the
+  new `fault_inject_rule` field on `StartRehearsalBody`) — test-only, admin
+  only, active only for the duration of a single rehearsal request. Used
+  exclusively by the forced-failure test; never invoked by the UI, and
+  never by real workflows.
+
+### Verification
+- **Targeted**: `pytest tests/test_recovery_eb17b.py -q` →
+  **39 passed, 0 failed** (baseline 38 + 1 new
+  `test_forced_detector_execution_failure_forces_integrity_fail`), 3
+  consecutive stable runs.
+- **Live proof captured by curl against `/api/recovery/rehearsals`**:
+  - Clean rehearsal → `integrity_engine_detectors_executed=60`,
+    `integrity_engine_error_findings=0`, `integrity_engine_error_rules=[]`,
+    `integrity_gate=PASS`.
+  - Forced fault on `act.activated_not_ready` →
+    `integrity_engine_detectors_executed=60`,
+    `integrity_engine_error_findings=1`,
+    `integrity_engine_error_rules=['act.activated_not_ready']`,
+    `integrity_gate=FAIL`, `final_state=Failed`.
+- **Final full backend suite** (`pytest -q -rs`) →
+  **629 passed, 4 skipped, 0 failed** in 749.34 s.
+- **Every skip (exact test name and reason)** — all four inherited from
+  EB-10 / EB-10.1 pre-existing conditional guards; none new to EB-17b:
+  1. `tests/test_activation_eb10.py:350` — *No overridable outstanding item currently available*
+  2. `tests/test_activation_eb10.py:378` — *No overridable outstanding item currently available*
+  3. `tests/test_activation_eb10_extra.py:88` — *No manual Licence and Compliance item in template*
+  4. `tests/test_activation_eb10_extra.py:108` — *No non-Compliance manual item available*
+
+### Files changed
+- `backend/integrity_module.py` — 15 × `.limit(N) → .to_list(N)` fixes across
+  the previously-broken detectors; +1 env-var-gated fault-injection hook in
+  `IntegrityService.run` (test-only, no runtime cost when unset).
+- `backend/recovery_module.py` — hard-fail rule when engine errors > 0;
+  new rehearsal-record fields (`integrity_engine_detectors_executed`,
+  `integrity_engine_error_rules`); `fault_inject_rule` plumbed through
+  `StartRehearsalBody` → `start_rehearsal` → `_run_namespace_gates`.
+- `backend/tests/test_recovery_eb17b.py` — updated `test_clean_rehearsal_...`
+  to assert `error_findings == 0` and `detectors_executed > 0`; added
+  `test_forced_detector_execution_failure_forces_integrity_fail`.
+
+### Requirement matrix — EB-17b
+15/15 PASS · **0 MISSING · 0 DEFERRED**.
+
+### Boundary confirmation
+Reconciliation remains a separate result on every rehearsal record;
+security assessment remains a separate result on every rehearsal record;
+no real ACE data, no real credentials, no external providers activated,
+no deploy, no GitHub push, `main` untouched.

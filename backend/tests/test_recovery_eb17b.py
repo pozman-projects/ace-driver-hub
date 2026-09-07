@@ -588,16 +588,22 @@ class TestRealNamespaceEngines:
                              json={}, timeout=60).json()
 
     def test_clean_rehearsal_real_engines_pass(self, admin_headers):
-        """Clean fictional dataset → both real engines PASS. Rehearsal
-        record must include engine result payloads and the scratch DB
-        name proving isolation."""
+        """Clean fictional dataset → all applicable EB-16 detectors
+        execute successfully (engine_error_count = 0) and both real
+        engines PASS. Rehearsal record must include engine result
+        payloads and the scratch DB name proving isolation."""
         b = self._clean_backup(admin_headers)
         r = requests.post(f"{API}/recovery/rehearsals", headers=admin_headers,
                           json={"backup_run_id": b["backup_run_id"],
                                 "approved": True}, timeout=180).json()
         assert r["final_state"] == "Passed", r
-        assert r["integrity_gate"] == "PASS"
-        assert r["security_gate"] == "PASS"
+        assert r["integrity_gate"] == "PASS", r
+        assert r["security_gate"] == "PASS", r
+        # HARD RULE: zero detector execution errors on a clean rehearsal.
+        assert r.get("integrity_engine_error_findings", 0) == 0, r
+        assert r.get("integrity_engine_error_rules") == [], r
+        # All applicable EB-16 detectors executed against the scratch namespace.
+        assert r.get("integrity_engine_detectors_executed", 0) > 0, r
         # Engine payloads must be populated — proves real engines ran
         assert "integrity_engine_counts" in r
         assert "security_engine_counts" in r
@@ -607,7 +613,8 @@ class TestRealNamespaceEngines:
         assert r.get("namespace_scratch_db") != _db().name
         # Confirm scratch DB was dropped by mongo client
         client = MongoClient(os.environ["MONGO_URL"])
-        assert r["namespace_scratch_db"] not in client.list_database_names()
+        assert not any(d.startswith(r["namespace_scratch_db"])
+                        for d in client.list_database_names())
 
     def test_security_defect_seeded_in_namespace_fails_security_gate(
         self, admin_headers,
@@ -659,9 +666,32 @@ class TestRealNamespaceEngines:
                                 "approved": True}, timeout=180).json()
         assert r["integrity_gate"] == "FAIL", r
         assert r["final_state"] == "Failed"
+        # Even under a data defect, engine execution itself must be clean.
+        assert r.get("integrity_engine_error_findings", 0) == 0, r
+        assert r.get("integrity_engine_error_rules") == [], r
         counts = r.get("integrity_engine_counts") or {}
         # Duplicate driver_code is severity Critical in the EB-16 catalogue
         assert (counts.get("Error", 0) + counts.get("Critical", 0)) >= 1, r
+
+    def test_forced_detector_execution_failure_forces_integrity_fail(
+        self, admin_headers,
+    ):
+        """Force ONE EB-16 detector to raise inside the scratch namespace
+        run → per EB-17b Final Integrity Close-out, integrity_gate must
+        NOT PASS regardless of any other findings. The failed detector
+        name and error count must be persisted on the rehearsal record."""
+        target_rule = "cmp.expired_marked_compliant"
+        b = self._clean_backup(admin_headers)
+        r = requests.post(f"{API}/recovery/rehearsals", headers=admin_headers,
+                          json={"backup_run_id": b["backup_run_id"],
+                                "approved": True,
+                                "fault_inject_rule": target_rule},
+                          timeout=180).json()
+        assert r["integrity_gate"] == "FAIL", r
+        assert r["final_state"] == "Failed", r
+        assert r.get("integrity_engine_error_findings", 0) >= 1, r
+        rules = r.get("integrity_engine_error_rules") or []
+        assert target_rule in rules, r
 
     def test_live_db_state_does_not_contaminate_rehearsal(self, admin_headers):
         """Live/dev security_assessment_events rows without _source tag

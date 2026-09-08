@@ -344,24 +344,25 @@ async def _validate_and_persist(upload: UploadFile, actor_email: str, document_i
     size = 0
     head = b""
     first_chunk = True
+    buf = bytearray()
     try:
-        with dest.open("wb") as f:
-            while True:
-                chunk = await upload.read(1024 * 64)
-                if not chunk:
-                    break
-                if first_chunk:
-                    head = chunk[:16]
-                    first_chunk = False
-                size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
-                    raise UploadValidationError(f"File exceeds max size {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
-                sha.update(chunk)
-                f.write(chunk)
+        while True:
+            chunk = await upload.read(1024 * 64)
+            if not chunk:
+                break
+            if first_chunk:
+                head = chunk[:16]
+                first_chunk = False
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                raise UploadValidationError(f"File exceeds max size {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
+            sha.update(chunk)
+            buf.extend(chunk)
         if size == 0:
             raise UploadValidationError("Zero-byte file rejected")
         if not _sniff_content(head, ext):
             raise UploadValidationError(f"File content does not match extension .{ext}")
+        dest.write_bytes(bytes(buf))
     except UploadValidationError:
         try:
             dest.unlink(missing_ok=True)

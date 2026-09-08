@@ -655,9 +655,14 @@ app.include_router(build_recovery_router(db, app, get_current_user))
 from uat_module import build_uat_router, ensure_indexes as _uat_ensure  # noqa: E402
 app.include_router(build_uat_router(db, app, get_current_user))
 
+# --- EB-18 Controlled Go-Live framework ---
+from golive_module import build_golive_router, ensure_indexes as _gl_ensure  # noqa: E402
+app.include_router(build_golive_router(db, app, get_current_user))
+
 @app.on_event("startup")
 async def _eb17c_indexes():
     await _uat_ensure(db)
+    await _gl_ensure(db)
 
 app.add_middleware(
     CORSMiddleware,

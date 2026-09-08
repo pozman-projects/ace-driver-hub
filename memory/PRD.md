@@ -1541,3 +1541,103 @@ providers, no real ACE data, no deploy.
 No real ACE data, no live providers, no public webhook activation, no deploy,
 no GitHub push, `main` untouched.
 
+
+
+---
+
+## EB-18 — Controlled Go-Live Framework (2026-02-27) — **FRAMEWORK COMPLETE**
+
+### Constitutional Boundary (enforced, non-negotiable)
+EB-18 authorises the **build and verification of the controlled Go-Live
+execution framework only**. It grants NO permission to:
+- Deploy the application to Production
+- Import real ACE data
+- Enable live providers (SMTP, SMS, webhook receivers)
+- Enable public webhooks
+- Enable CronJobs / schedulers
+- Push to GitHub / touch `main`
+
+### Deliverables (all present)
+1. **Prerequisite re-verification** — `/api/go-live/prerequisites` snapshots
+   the 11 EB-17c gates (Integrity, Security, Recovery, Migration Readiness,
+   UAT completion, sign-offs across 7 areas, zero Critical/High defects,
+   zero expired security exceptions, zero open Critical conditions, all
+   25 checklist items Complete/Waived, rollback runbook present).
+2. **`golive_module.py`** — DRY_RUN / REHEARSAL / PRODUCTION modes with the
+   PRODUCTION path gated behind an explicit approval marker (never
+   one-clickable from the UI).
+3. **Controlled real-data migration gate** — `/api/go-live/migration-authorisation`
+   (grant / list / revoke) with reason + approver + expiry.
+4. **Production deployment package generator** — `/api/go-live/deployment-package`
+   produces the immutable package manifest (application version, migration
+   set, config diff, prerequisite snapshot hash).
+5. **Cutover execution workflow** — 33-step canonical checklist with
+   per-step lifecycle (Pending → Running → Completed / Failed / Skipped),
+   abort criteria, and rollback path (`/api/go-live/runs/{rid}/abort`,
+   `/api/go-live/runs/{rid}/rollback`).
+6. **Monitoring window** — `/api/go-live/runs/{rid}/monitoring` accepts
+   snapshots and returns rolling status until the run reaches the final
+   release decision.
+7. **Release decision gates** — RELEASED, RELEASED_WITH_CONDITIONS,
+   ABORTED, ROLLED_BACK via `/api/go-live/release-decision`.
+8. **Frontend Go-Live Control Centre** — `/administration/go-live` with
+   seven tabs: Overview, Prerequisites, Cutover, Migration Authorisation,
+   Monitoring, Rollback, Release Decision.
+9. **Runbooks (6 files, all present in `/app/memory`)**:
+   - `EB-18-GO-LIVE-RUNBOOK.md`
+   - `EB-18-CUTOVER-CHECKLIST.md`
+   - `EB-18-MIGRATION-AUTHORISATION-RUNBOOK.md`
+   - `EB-18-MONITORING-RUNBOOK.md`
+   - `EB-18-ROLLBACK-RUNBOOK.md`
+   - `EB-18-RELEASE-EVIDENCE-PACK.md`
+
+### Endpoint Matrix (17 routes)
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/go-live/status` | GET | Framework health summary |
+| `/api/go-live/prerequisites` | GET | Snapshot of 11 EB-17c gates |
+| `/api/go-live/runs` | POST | Create DRY_RUN / REHEARSAL / PRODUCTION run |
+| `/api/go-live/runs` | GET | List runs |
+| `/api/go-live/runs/{rid}` | GET | Run detail + steps + evidence |
+| `/api/go-live/runs/{rid}/approve` | POST | Approval marker (required for PRODUCTION) |
+| `/api/go-live/runs/{rid}/start` | POST | Move run into Running state |
+| `/api/go-live/runs/{rid}/steps/{step_id}/complete` | POST | Advance step |
+| `/api/go-live/runs/{rid}/abort` | POST | Abort with reason |
+| `/api/go-live/runs/{rid}/rollback` | POST | Execute rollback path |
+| `/api/go-live/runs/{rid}/monitoring` | GET | List monitoring snapshots |
+| `/api/go-live/runs/{rid}/monitoring` | POST | Record monitoring snapshot |
+| `/api/go-live/deployment-package` | GET | Immutable deployment package |
+| `/api/go-live/release-decision` | GET | Latest release decision |
+| `/api/go-live/migration-authorisation` | GET | List authorisations |
+| `/api/go-live/migration-authorisation` | POST | Grant authorisation |
+| `/api/go-live/migration-authorisation/revoke` | POST | Revoke authorisation |
+
+### Verification (2026-02-27)
+- **EB-18 targeted:** `pytest tests/test_golive_eb18.py -q` → **27 passed, 0 failed**
+- **Final full backend suite:** `pytest -q -rs` → **686 passed, 4 skipped, 0 failed** in 115.42s (localhost backend URL to bypass Cloudflare-edge transient timeouts).
+- **Every skip (unchanged from EB-17c):**
+  1. `tests/test_activation_eb10.py:350` — *No overridable outstanding item currently available*
+  2. `tests/test_activation_eb10.py:378` — *No overridable outstanding item currently available*
+  3. `tests/test_activation_eb10_extra.py:88` — *No manual Licence and Compliance item in template*
+  4. `tests/test_activation_eb10_extra.py:108` — *No non-Compliance manual item available*
+- **Frontend QA:** `testing_agent` iteration_28 → **100% PASS** across 7 tabs, lifecycle (READY TO START → RUNNING → ABORTED), RBAC (ReadOnly correctly blocked with 403 + toast), responsive at 1920×1080 and 1440×900 (no horizontal scroll), 0 console errors, 0 console warnings.
+
+### Requirement Matrix
+| # | Requirement | Status | Proof |
+|---|---|---|---|
+| 1 | Re-verify EB-18 entry prerequisites | COMPLETE | `/api/go-live/prerequisites` returns 11 gates + snapshot hash |
+| 2 | `golive_module.py` DRY_RUN/REHEARSAL/PRODUCTION | COMPLETE | 711 lines, 3 modes, PRODUCTION gated by approval marker |
+| 3 | Controlled real-data migration gate | COMPLETE | 3 endpoints: grant/list/revoke |
+| 4 | Deployment package generator | COMPLETE | `/api/go-live/deployment-package` |
+| 5 | Cutover / abort / rollback / monitoring | COMPLETE | 33-step workflow + monitoring snapshots |
+| 6 | Release decision gates (4 outcomes) | COMPLETE | `/api/go-live/release-decision` |
+| 7 | Frontend Go-Live Control Centre | COMPLETE | `/administration/go-live` — 7 tabs, all data-testid attributes |
+| 8 | 6 runbook markdown files | COMPLETE | All present in `/app/memory` |
+| — | Zero backend failures (full regression) | COMPLETE | 686 passed / 4 skipped / **0 failed** |
+| — | Framework-only (no irreversible actions) | COMPLETE | No production deploy, no real data, no live providers, no public webhooks, no CronJobs, `main` untouched |
+
+**MISSING: 0. DEFERRED: 0. Framework COMPLETE. Actual Production go-live NOT EXECUTED.**
+
+### Boundary Re-affirmed
+No real ACE data imported, no live providers enabled, no public webhook
+activation, no production deploy, no GitHub push, `main` untouched.

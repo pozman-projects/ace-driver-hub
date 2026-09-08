@@ -46,6 +46,7 @@ import SecurityControlCentre from "./pages/SecurityControlCentre";
 import RecoveryDashboard from "./pages/RecoveryDashboard";
 import UATPage from "./pages/UATPage";
 import ProductionReadinessPage from "./pages/ProductionReadinessPage";
+import GoLivePage from "./pages/GoLivePage";
 
 function App() {
   return (
@@ -234,6 +235,7 @@ function App() {
             <Route path="/administration/recovery" element={<ProtectedRoute><RecoveryDashboard /></ProtectedRoute>} />
             <Route path="/administration/uat" element={<ProtectedRoute><UATPage /></ProtectedRoute>} />
             <Route path="/administration/production-readiness" element={<ProtectedRoute><ProductionReadinessPage /></ProtectedRoute>} />
+            <Route path="/administration/go-live" element={<ProtectedRoute><GoLivePage /></ProtectedRoute>} />
             <Route path="/operations" element={<ProtectedRoute><OperationsDashboard /></ProtectedRoute>} />
             <Route path="/operations/driver-readiness" element={<ProtectedRoute><DriverReadinessPage /></ProtectedRoute>} />
             <Route path="/operations/compliance-workload" element={<ProtectedRoute><ComplianceWorkloadPage /></ProtectedRoute>} />

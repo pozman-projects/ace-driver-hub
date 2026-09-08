@@ -563,19 +563,28 @@ class IntegrityService:
         return rows
 
     async def _act_counts_not_reconciling(self):
+        # Server-side filter for records whose mandatory counts do not
+        # reconcile: (mandatory_item_count - mandatory_completed_count)
+        # must equal outstanding_mandatory_count. Uses $expr with
+        # $ifNull coercion so missing fields are treated as 0. Limit
+        # applied after filtering so genuine discrepancies are never
+        # dropped by pagination.
         rows = []
-        async for r in self.db["driver_activation_records"].find(
-            {"applicable_item_count": {"$exists": True}},
+        cursor = self.db["driver_activation_records"].find(
+            {"applicable_item_count": {"$exists": True},
+              "$expr": {
+                  "$ne": [
+                      {"$subtract": [
+                          {"$ifNull": ["$mandatory_item_count", 0]},
+                          {"$ifNull": ["$mandatory_completed_count", 0]}]},
+                      {"$ifNull": ["$outstanding_mandatory_count", 0]}]}},
             {"_id": 0, "driver_activation_id": 1,
               "applicable_item_count": 1, "completed_item_count": 1,
               "mandatory_item_count": 1,
               "mandatory_completed_count": 1,
-              "outstanding_mandatory_count": 1}).limit(500):
-            m = r.get("mandatory_item_count") or 0
-            mc = r.get("mandatory_completed_count") or 0
-            outstanding = r.get("outstanding_mandatory_count") or 0
-            if (m - mc) != outstanding:
-                rows.append(r)
+              "outstanding_mandatory_count": 1}).limit(500)
+        async for r in cursor:
+            rows.append(r)
         return rows
 
     async def _act_expired_override_active(self):

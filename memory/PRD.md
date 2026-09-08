@@ -1443,3 +1443,101 @@ Reconciliation remains a separate result on every rehearsal record;
 security assessment remains a separate result on every rehearsal record;
 no real ACE data, no real credentials, no external providers activated,
 no deploy, no GitHub push, `main` untouched.
+
+## EB-17c — UAT, Sign-offs & Production Readiness Gate (Feb 2026) ✅ COMPLETE
+
+Phase-2 gate before EB-18. Fictional-only (`_source: seed-eb17c`). No live
+providers, no real ACE data, no deploy.
+
+### Backend
+- `backend/uat_module.py` — `UATService` + `build_uat_router(db, app, get_current_user)`.
+  Registered from `backend/server.py`. Startup event ensures indexes.
+- Collections created: `uat_test_plans`, `uat_test_cases`, `uat_test_runs`,
+  `uat_test_results`, `uat_defects`, `uat_signoffs`, `uat_evidence`,
+  `production_readiness_snapshots` (reserved), `production_readiness_checklist`,
+  `production_readiness_events` (reserved), `production_readiness_conditions`.
+- Deterministic seeded fictional cases: 59 across 7 packs — Driver Lifecycle,
+  Compliance, Migration, Notifications, Operations, Security, Recovery.
+- Statuses: Case {Draft, Ready, In Progress, Passed, Failed, Blocked,
+  Not Applicable, Retest Required}; Defect {Open, Investigating, Fixed,
+  Ready for Retest, Closed, Deferred, Reopened}; Sign-off {Pending, Approved,
+  Approved with Conditions, Rejected, Withdrawn}; Condition {Open, Accepted,
+  Resolved, Expired, Rejected}. Critical/High defects never deferred; Closed
+  requires evidence or passing retest; sign-offs immutable (withdraw + new
+  version); sign-offs blocked while Critical/High defects open, or any of
+  Integrity / Security / Recovery gate = FAIL, or expired non-fictional
+  security exceptions exist. Critical conditions cannot be Accepted.
+- Routes (all `/api`-prefixed, RBAC-enforced):
+  - UAT: `POST/GET /uat/plans`, `GET /uat/plans/{id}`, `GET /uat/cases`,
+    `POST /uat/plans/{id}/start`, `GET /uat/runs/{id}`,
+    `POST /uat/runs/{id}/close`, `POST /uat/results/{run_id}`,
+    `POST/GET /uat/defects`, `POST /uat/defects/{id}/transition`,
+    `POST/GET /uat/signoffs`, `POST /uat/signoffs/{id}/withdraw`.
+  - Production Readiness: `GET /production-readiness/status`, `.../gate`,
+    `.../checklist`, `POST .../checklist/{item_id}/update`.
+  - Conditions: `GET .../conditions`, `POST .../conditions`,
+    `POST .../conditions/{id}/update`.
+- Readiness rule: worst-status-wins across Integrity, Security, Recovery,
+  Migration readiness, UAT completion (100%), open Critical/High defects,
+  every area sign-off Approved / Approved-with-Conditions, expired
+  non-fictional security exceptions = 0, critical conditions = 0, every
+  checklist item Complete/Waived (system items derive from live gates and
+  reject manual writes with 400), rollback plan file present.
+- Result: `READY` | `CONDITIONALLY_READY` (warnings only) | `NOT_READY`.
+  No admin override to force READY.
+
+### Frontend
+- `/administration/uat` — 5-tab workspace (Plans, Runs, Test Cases, Defects,
+  Sign-offs). All interactive elements carry `data-testid`.
+- `/administration/production-readiness` — Overall gate banner, 8 gate cards,
+  UAT summary, defect summary, sign-off matrix, conditions register,
+  checklist. Accessible text labels (READY / CONDITIONALLY READY / NOT READY),
+  not colour-only.
+
+### Documentation
+- `memory/EB-17c-UAT-PLAN.md`
+- `memory/EB-17c-UAT-EXECUTION-RUNBOOK.md`
+- `memory/EB-17c-PRODUCTION-READINESS-RUNBOOK.md`
+- `memory/EB-17c-GO-LIVE-CHECKLIST.md`
+- `memory/EB-17c-GO-LIVE-ROLLBACK-RUNBOOK.md`
+- `VERSION` bumped to `dcc-phase2-eb17c`.
+
+### Verification
+- Targeted: `pytest tests/test_uat_eb17c.py -q` → **30 passed** (plan
+  lifecycle, appending results, blocker-with-reason, defect lifecycle
+  including Critical/High cannot-defer + close-requires-evidence, sign-off
+  immutability / role restriction / withdraw / defect-blocks-approval,
+  readiness NOT_READY → READY → CONDITIONALLY_READY, critical condition
+  blocks, checklist RBAC, waiver-requires-evidence, expired condition
+  visible, RBAC on every mutation).
+- Final full backend suite: `pytest -q -rs` → **659 passed, 4 skipped,
+  0 failed** in 318.04 s (localhost backend URL to avoid Cloudflare-edge
+  transient timeouts on notification-scan tests).
+- Every skip:
+  1. `tests/test_activation_eb10.py:350` — *No overridable outstanding item currently available*
+  2. `tests/test_activation_eb10.py:378` — *No overridable outstanding item currently available*
+  3. `tests/test_activation_eb10_extra.py:88` — *No manual Licence and Compliance item in template*
+  4. `tests/test_activation_eb10_extra.py:108` — *No non-Compliance manual item available*
+- Frontend `testing_agent_v3_fork` iteration_27 → **21/21 checkpoints PASS**,
+  0 app-level JS errors, 0 console warnings (one intentional 403 from
+  ReadOnly attempting Create Plan is logged by Chromium as a network log,
+  handled cleanly by the app via toast).
+
+### EB-18 Prerequisites (must be READY before EB-18 begins)
+1. Integrity gate = PASS
+2. Security gate = PASS
+3. Recovery gate = PASS
+4. Migration readiness = PASS
+5. Zero open Critical / High UAT defects
+6. All 7 area sign-offs Approved or Approved with Conditions (Business Ops,
+   Compliance, Management, Technical, Security, Data Migration, Recovery)
+7. Zero expired non-fictional security exceptions
+8. Zero open Critical conditions in the Condition Register
+9. UAT completion = 100%
+10. All 25 checklist items Complete / Waived (with evidence)
+11. `memory/EB-17c-GO-LIVE-ROLLBACK-RUNBOOK.md` present
+
+### Boundary
+No real ACE data, no live providers, no public webhook activation, no deploy,
+no GitHub push, `main` untouched.
+

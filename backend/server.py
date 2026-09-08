@@ -651,6 +651,14 @@ app.include_router(build_security_router(db, app, get_current_user))
 from recovery_module import build_recovery_router  # noqa: E402
 app.include_router(build_recovery_router(db, app, get_current_user))
 
+# --- EB-17c UAT / Sign-offs / Production Readiness ---
+from uat_module import build_uat_router, ensure_indexes as _uat_ensure  # noqa: E402
+app.include_router(build_uat_router(db, app, get_current_user))
+
+@app.on_event("startup")
+async def _eb17c_indexes():
+    await _uat_ensure(db)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

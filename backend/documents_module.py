@@ -362,7 +362,14 @@ async def _validate_and_persist(upload: UploadFile, actor_email: str, document_i
             raise UploadValidationError("Zero-byte file rejected")
         if not _sniff_content(head, ext):
             raise UploadValidationError(f"File content does not match extension .{ext}")
-        dest.write_bytes(bytes(buf))
+        # EB-13 · Route the byte-write through the private object-storage
+        # adapter. The adapter (LocalStorageAdapter in dev, S3-compatible
+        # in production) owns all persistence; documents_module never
+        # writes to pod-local disk at runtime.
+        from storage_module import _build_adapter_from_env
+        _adapter, _ = _build_adapter_from_env()
+        _adapter.put(key, bytes(buf),
+                      content_type=declared_mime or ALLOWED_EXTENSIONS[ext][0])
     except UploadValidationError:
         try:
             dest.unlink(missing_ok=True)

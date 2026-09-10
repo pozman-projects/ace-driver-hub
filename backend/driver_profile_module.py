@@ -41,8 +41,8 @@ NOTE_VERSIONS_COLL = "driver_note_versions"
 
 DRIVERS_COLL = "drivers"
 OWNERS_COLL = "owners"
-VEHICLES_COLL = "vehicles"
-EQUIPMENT_COLL = "equipment"
+VEHICLES_COLL = "vehicles_register"
+EQUIPMENT_COLL = "equipment_register"
 
 DOR_COLL = "driver_owner_relationships"
 DVA_COLL = "driver_vehicle_assignments"

@@ -356,6 +356,15 @@ async def root():
     return {"service": "ACE Driver Hub API", "status": "ok"}
 
 
+@api_router.get("/public-config")
+async def public_config():
+    """Public runtime config for the SPA. Exposes ONLY non-secret,
+    non-authenticated indicators. Used by the login page to decide
+    whether to render the prototype-seeded-admin helper (which must
+    never render in Production)."""
+    return {"app_env": os.environ.get("APP_ENV", "dev").lower()}
+
+
 # ----------- Startup: indexes, admin seed, sample data -----------
 async def seed_sample_data():
     """Seed sample data only when collections are empty."""

@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { TruckTrailer } from "@phosphor-icons/react";
 
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+
 export default function Login() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
@@ -10,10 +12,36 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // EB-18 login hardening: runtime app_env resolution. Helper is hidden
+  // when the backend reports APP_ENV=production. Default 'production'
+  // (fail-closed) so any fetch/network failure never leaks seeded
+  // credentials on a real deployment.
+  const [appEnv, setAppEnv] = useState("production");
 
   useEffect(() => {
     if (user) navigate("/", { replace: true });
   }, [user, navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${BACKEND_URL}/api/public-config`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!cancelled && typeof j.app_env === "string") {
+          setAppEnv(j.app_env.toLowerCase());
+        }
+      } catch (_) {
+        // fail-closed: leave appEnv at "production"
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -151,18 +179,23 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-10 border border-slate-200 rounded-lg p-4 bg-slate-50">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500 mb-2">
-              Prototype Seeded Admin
+          {process.env.REACT_APP_APP_ENV !== "production" && appEnv !== "production" && (
+            <div
+              data-testid="prototype-seeded-admin-helper"
+              className="mt-10 border border-slate-200 rounded-lg p-4 bg-slate-50"
+            >
+              <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-500 mb-2">
+                Prototype Seeded Admin
+              </div>
+              <div className="text-xs text-slate-700 font-mono leading-relaxed">
+                admin@acedriverhub.com<br />Admin@123
+              </div>
+              <div className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                For prototype testing only. Replace seeded credentials before
+                real-world deployment.
+              </div>
             </div>
-            <div className="text-xs text-slate-700 font-mono leading-relaxed">
-              admin@acedriverhub.com<br />Admin@123
-            </div>
-            <div className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-              For prototype testing only. Replace seeded credentials before
-              real-world deployment.
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

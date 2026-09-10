@@ -114,409 +114,192 @@ export default function Hub() {
         {/* Compliance widget */}
         <ComplianceWidget data={compliance} loaded={loaded} />
 
-        {/* Foundation Registers (EB-02) */}
-        <section className="mb-4" data-testid="foundation-registers-section">
-          <div className="mb-3 flex items-baseline justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                Foundation Registers
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                Canonical master records
-              </span>
+        {/* Command centre body: primary 8 modules + right rail */}
+        <div
+          className="grid grid-cols-12 gap-4 lg:gap-5"
+          data-testid="dashboard-body"
+        >
+          {/* Primary operational modules — dominant central grid */}
+          <section
+            className="col-span-12 xl:col-span-9"
+            data-testid="primary-modules-section"
+          >
+            <div className="mb-3 flex items-baseline justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                  Primary Operational Modules
+                </span>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400 hidden sm:inline">
+                  Command centre · fleet, drivers, equipment
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              { slug: "drivers", title: "Drivers", desc: "Identity, contact, payroll and status.", icon: Users },
-              { slug: "owners", title: "Owners", desc: "Owners of vehicles and equipment.", icon: IdentificationCard },
-              { slug: "vehicles", title: "Vehicles", desc: "Rego, VIN, ownership and status.", icon: Truck },
-              { slug: "equipment", title: "Equipment", desc: "Trays, trailers and other assets.", icon: Toolbox },
-            ].map((r) => {
-              const Icon = r.icon;
-              return (
-                <Link
-                  key={r.slug}
-                  to={`/registers/${r.slug}`}
-                  data-testid={`register-card-${r.slug}`}
-                  className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-                >
-                  <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
-                    <Icon size={20} weight="regular" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-display font-semibold text-slate-900 text-sm leading-tight">
-                      {r.title}
+            <div
+              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4 gap-4"
+              data-testid="module-grid"
+            >
+              {MODULES.map((mod, i) => {
+                const Icon = ICONS[mod.icon] || Users;
+                const count = stats[mod.slug];
+                return (
+                  <Link
+                    key={mod.slug}
+                    to={`/m/${mod.slug}`}
+                    data-testid={`module-card-${mod.slug}`}
+                    className="ace-fade-up bg-white border border-slate-200 rounded-xl p-5 lg:p-6 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-cyan-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left h-full min-h-[172px]"
+                    style={{ animationDelay: `${i * 40}ms` }}
+                  >
+                    <div className="flex items-start justify-between w-full mb-4">
+                      <div className="p-3 bg-cyan-50 rounded-lg text-cyan-700 group-hover:bg-slate-900 group-hover:text-white transition-colors duration-300">
+                        <Icon size={26} weight="regular" />
+                      </div>
+                      <ArrowUpRight
+                        size={18}
+                        weight="bold"
+                        className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-300"
+                      />
                     </div>
-                    <div className="text-[11px] text-slate-500 truncate">{r.desc}</div>
-                  </div>
-                  <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Relationships & Assignments (EB-03) */}
-        <section className="mb-4" data-testid="relationships-section">
-          <div className="mb-3 flex items-baseline justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                Relationships &amp; Assignments
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                Dated links between master records
-              </span>
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1">
+                      Module 0{i + 1}
+                    </div>
+                    <h3 className="font-display text-lg lg:text-xl font-semibold text-slate-900 leading-tight mb-1.5">
+                      {mod.title}
+                    </h3>
+                    <p className="text-xs text-slate-500 leading-snug mb-3 line-clamp-2">
+                      {mod.description}
+                    </p>
+                    <div className="mt-auto pt-3 border-t border-slate-100 w-full flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                        Records
+                      </span>
+                      <span
+                        className="font-display text-xl font-semibold text-slate-900"
+                        data-testid={`module-count-${mod.slug}`}
+                      >
+                        {count ?? "—"}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {[
-              { slug: "driver-owner", title: "Driver – Owner", desc: "Current ownership context per driver.", icon: IdentificationCard },
-              { slug: "driver-vehicle", title: "Driver – Vehicle", desc: "Active primary driver per vehicle.", icon: Truck },
-              { slug: "driver-equipment", title: "Driver – Equipment", desc: "Trays / trailers allocation.", icon: Toolbox },
-            ].map((r) => {
-              const Icon = r.icon;
-              return (
+
+            {/* Compact canonical compliance strip */}
+            <section
+              className="mt-5"
+              data-testid="canonical-compliance-section"
+            >
+              <div className="mb-3 flex items-baseline justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
+                    <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                    Compliance Overview
+                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400 hidden sm:inline">
+                    Canonical records monitoring
+                  </span>
+                </div>
                 <Link
-                  key={r.slug}
-                  to={`/relationships/${r.slug}`}
-                  data-testid={`relationship-card-${r.slug}`}
-                  className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
+                  to="/compliance"
+                  data-testid="canonical-compliance-overview-link"
+                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 uppercase tracking-[0.2em]"
                 >
-                  <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
-                    <Icon size={20} weight="regular" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-display font-semibold text-slate-900 text-sm leading-tight">{r.title}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{r.desc}</div>
-                  </div>
-                  <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
+                  Open overview
+                  <ArrowUpRight size={12} weight="bold" />
                 </Link>
-              );
-            })}
-          </div>
-        </section>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+                {[
+                  { slug: "driver-licences", title: "Driver Licences", icon: IdentificationCard },
+                  { slug: "vehicle-registrations", title: "Vehicle Registration", icon: Truck },
+                  { slug: "vehicle-insurance", title: "Vehicle Insurance", icon: ShieldCheck },
+                  { slug: "vehicle-inspections", title: "Vehicle Inspections", icon: ShieldCheck },
+                  { slug: "vehicle-defects", title: "Vehicle Defects", icon: Warning },
+                  { slug: "vehicle-maintenance-tasks", title: "Vehicle Maintenance", icon: Wrench },
+                  { slug: "equipment-compliance", title: "Equipment Compliance", icon: Toolbox },
+                ].map((r) => {
+                  const Icon = r.icon;
+                  return (
+                    <Link
+                      key={r.slug}
+                      to={`/compliance/records/${r.slug}`}
+                      data-testid={`compliance-card-${r.slug}`}
+                      className="ace-fade-up bg-white border border-slate-200 rounded-lg px-3 py-2.5 shadow-sm hover:shadow hover:border-cyan-300 transition-all duration-300 group flex items-center gap-2"
+                    >
+                      <div className="p-1.5 bg-cyan-50 text-cyan-700 rounded-md group-hover:bg-cyan-500 group-hover:text-white transition-colors">
+                        <Icon size={14} weight="regular" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-slate-900 text-[11px] leading-tight truncate">
+                          {r.title}
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          </section>
 
-        {/* Documents & Evidence (EB-05) */}
-        <section className="mb-4" data-testid="documents-section">
-          <div className="mb-3 flex items-baseline justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                Documents &amp; Evidence
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                Private evidence store · versioned · audited
-              </span>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Link
-              to="/documents"
-              data-testid="documents-library-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
-                <Files size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Document Library</div>
-                <div className="text-[11px] text-slate-500 truncate">Search, upload, preview, version every file.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/documents?status=Under+Review"
-              data-testid="documents-review-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-amber-50 text-amber-700 rounded-lg group-hover:bg-amber-500 group-hover:text-white transition-colors">
-                <Clock size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Under Review</div>
-                <div className="text-[11px] text-slate-500 truncate">Files awaiting validation before activation.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/documents?archived=true"
-              data-testid="documents-archived-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-slate-100 text-slate-500 rounded-lg group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                <Files size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Archived Documents</div>
-                <div className="text-[11px] text-slate-500 truncate">Retained history — restorable by Admin/Manager.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-          </div>
-        </section>
-
-        {/* Data Import & Migration (EB-06) */}
-        <section className="mb-4" data-testid="imports-section">
-          <div className="mb-3 flex items-baseline justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                Data Import &amp; Migration
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                Guided XLSX / XLSM / CSV import · dry-run · reversible
-              </span>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Link
-              to="/imports"
-              data-testid="imports-centre-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Import Centre</div>
-                <div className="text-[11px] text-slate-500 truncate">Load ACE spreadsheets into canonical registers.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/migration-preparation"
-              data-testid="migration-prep-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Migration Preparation</div>
-                <div className="text-[11px] text-slate-500 truncate">Dry-run mapping, matching, reconciliation & Go/No-Go.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/administration/storage"
-              data-testid="storage-admin-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Storage Administration</div>
-                <div className="text-[11px] text-slate-500 truncate">Private object storage, retention, reconciliation & migration.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/migration-commit"
-              data-testid="migration-commit-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-rose-50 text-rose-700 rounded-lg group-hover:bg-rose-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Migration Commit</div>
-                <div className="text-[11px] text-slate-500 truncate">Approved commit, rollback & legacy backfill.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/administration/automation"
-              data-testid="automation-hub-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-lg group-hover:bg-emerald-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Automation & Delivery</div>
-                <div className="text-[11px] text-slate-500 truncate">Scheduler jobs, deliveries, providers & templates.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/operations"
-              data-testid="operations-hub-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Operations</div>
-                <div className="text-[11px] text-slate-500 truncate">Command dashboard, readiness & compliance workload.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/administration/integrity"
-              data-testid="integrity-hub-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Integrity & Release Gate</div>
-                <div className="text-[11px] text-slate-500 truncate">Cross-module checks and pre-release gate.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/administration/security"
-              data-testid="security-hub-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-slate-100 text-slate-800 rounded-lg group-hover:bg-slate-900 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Security Control Centre</div>
-                <div className="text-[11px] text-slate-500 truncate">Assessments, RBAC audit, secrets & exceptions.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-            <Link
-              to="/administration/recovery"
-              data-testid="recovery-hub-card"
-              className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-            >
-              <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <ArrowsDownUp size={20} weight="regular" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-slate-900 text-sm leading-tight">Recovery & Backup</div>
-                <div className="text-[11px] text-slate-500 truncate">Backup, restore, DR rehearsal, RPO/RTO.</div>
-              </div>
-              <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-            </Link>
-          </div>
-        </section>
-        <section className="mb-4" data-testid="canonical-compliance-section">
-          <div className="mb-3 flex items-baseline justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                Canonical Compliance
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                Records monitoring master records
-              </span>
-            </div>
-            <Link
-              to="/compliance"
-              data-testid="canonical-compliance-overview-link"
-              className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-900 uppercase tracking-[0.2em]"
-            >
-              Open overview
-              <ArrowUpRight size={12} weight="bold" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              { slug: "driver-licences", title: "Driver Licences", desc: "Primary licence per driver.", icon: IdentificationCard },
-              { slug: "vehicle-registrations", title: "Vehicle Registration", desc: "Current registration per vehicle.", icon: Truck },
-              { slug: "vehicle-insurance", title: "Vehicle Insurance", desc: "Current policy per cover type.", icon: ShieldCheck },
-              { slug: "vehicle-inspections", title: "Vehicle Inspections", desc: "Roadworthy & scheduled inspections.", icon: ShieldCheck },
-              { slug: "vehicle-defects", title: "Vehicle Defects", desc: "Defect register with severity.", icon: Warning },
-              { slug: "vehicle-maintenance-tasks", title: "Vehicle Maintenance", desc: "Scheduled + overdue tasks.", icon: Wrench },
-              { slug: "equipment-compliance", title: "Equipment Compliance", desc: "Cert, inspection, insurance.", icon: Toolbox },
-            ].map((r) => {
-              const Icon = r.icon;
-              return (
-                <Link
-                  key={r.slug}
-                  to={`/compliance/records/${r.slug}`}
-                  data-testid={`compliance-card-${r.slug}`}
-                  className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group flex items-center gap-3"
-                >
-                  <div className="p-2.5 bg-cyan-50 text-cyan-700 rounded-lg group-hover:bg-cyan-500 group-hover:text-white transition-colors">
-                    <Icon size={20} weight="regular" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-display font-semibold text-slate-900 text-sm leading-tight">{r.title}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{r.desc}</div>
-                  </div>
-                  <ArrowUpRight size={14} weight="bold" className="text-slate-300 group-hover:text-slate-900 transition-colors" />
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Legacy Prototype section label */}
-        <div className="mt-5 mb-3 flex items-baseline justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] uppercase tracking-[0.25em] text-slate-500 flex items-center gap-2">
-              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-slate-400" />
-              Legacy Prototype Modules
-            </span>
-            <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-              Preserved from Phase 1
-            </span>
-          </div>
+          {/* Right rail — compact secondary modules */}
+          <aside
+            className="col-span-12 xl:col-span-3 flex flex-col gap-4"
+            data-testid="secondary-rail"
+          >
+            <RailGroup
+              title="Foundation & Relationships"
+              testid="rail-group-foundation"
+              items={[
+                { to: "/registers/owners", label: "Owners", testid: "rail-owners" },
+                { to: "/registers/vehicles", label: "Vehicles", testid: "rail-vehicles" },
+                { to: "/relationships/driver-owner", label: "Driver – Owner", testid: "rail-driver-owner" },
+                { to: "/relationships/driver-vehicle", label: "Driver – Vehicle", testid: "rail-driver-vehicle" },
+                { to: "/relationships/driver-equipment", label: "Driver – Equipment", testid: "rail-driver-equipment" },
+              ]}
+            />
+            <RailGroup
+              title="Documents"
+              testid="rail-group-documents"
+              items={[
+                { to: "/documents", label: "Document Library", testid: "rail-documents-library" },
+                { to: "/documents?status=Under+Review", label: "Under Review", testid: "rail-documents-review" },
+                { to: "/documents?archived=true", label: "Archived Documents", testid: "rail-documents-archived" },
+              ]}
+            />
+            <RailGroup
+              title="Data & Migration"
+              testid="rail-group-migration"
+              items={[
+                { to: "/imports", label: "Import Centre", testid: "rail-imports" },
+                { to: "/migration-preparation", label: "Migration Preparation", testid: "rail-migration-prep" },
+                { to: "/migration-commit", label: "Migration Commit", testid: "rail-migration-commit" },
+                { to: "/administration/storage", label: "Storage Administration", testid: "rail-storage-admin" },
+              ]}
+            />
+            <RailGroup
+              title="Operations & Automation"
+              testid="rail-group-operations"
+              items={[
+                { to: "/administration/automation", label: "Automation & Delivery", testid: "rail-automation" },
+                { to: "/operations", label: "Operations", testid: "rail-operations" },
+              ]}
+            />
+            <RailGroup
+              title="Governance"
+              testid="rail-group-governance"
+              items={[
+                { to: "/administration/integrity", label: "Integrity & Release Gate", testid: "rail-integrity" },
+                { to: "/administration/security", label: "Security Control Centre", testid: "rail-security" },
+                { to: "/administration/recovery", label: "Recovery & Backup", testid: "rail-recovery" },
+                { to: "/administration/uat", label: "UAT", testid: "rail-uat" },
+                { to: "/administration/production-readiness", label: "Production Readiness", testid: "rail-production-readiness" },
+                { to: "/administration/go-live", label: "Go-Live", testid: "rail-go-live" },
+              ]}
+            />
+          </aside>
         </div>
 
-        {/* Module grid — Control Room Grid */}
-        <section
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
-          data-testid="module-grid"
-        >
-          {MODULES.map((mod, i) => {
-            const Icon = ICONS[mod.icon] || Users;
-            const count = stats[mod.slug];
-            return (
-              <Link
-                key={mod.slug}
-                to={`/m/${mod.slug}`}
-                data-testid={`module-card-${mod.slug}`}
-                className="ace-fade-up bg-white border border-gray-200 rounded-xl p-4 lg:p-5 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-gray-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left h-full"
-                style={{ animationDelay: `${i * 40}ms` }}
-              >
-                <div className="flex items-start justify-between w-full mb-3">
-                  <div className="p-2.5 bg-gray-50 rounded-lg text-gray-700 group-hover:bg-gray-900 group-hover:text-white transition-colors duration-300">
-                    <Icon size={22} weight="regular" />
-                  </div>
-                  <ArrowUpRight
-                    size={16}
-                    weight="bold"
-                    className="text-gray-300 group-hover:text-gray-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-300"
-                  />
-                </div>
-
-                <div className="text-[10px] uppercase tracking-[0.25em] text-gray-400 mb-1">
-                  Module 0{i + 1}
-                </div>
-                <h3 className="font-display text-base lg:text-lg font-semibold text-gray-900 leading-tight mb-1.5">
-                  {mod.title}
-                </h3>
-                <p className="text-xs text-gray-500 leading-snug mb-3 line-clamp-2">
-                  {mod.description}
-                </p>
-
-                <div className="mt-auto pt-3 border-t border-gray-100 w-full flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-gray-400">
-                    Records
-                  </span>
-                  <span
-                    className="font-display text-base font-semibold text-gray-900"
-                    data-testid={`module-count-${mod.slug}`}
-                  >
-                    {count ?? "—"}
-                  </span>
-                </div>
-              </Link>
-            );
-          })}
-        </section>
 
         <footer className="mt-5 pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-400">
           <div
@@ -584,6 +367,39 @@ function NotificationStrip() {
     </section>
   );
 }
+
+function RailGroup({ title, items, testid }) {
+  return (
+    <div
+      data-testid={testid}
+      className="ace-fade-up bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm"
+    >
+      <div className="text-[9px] uppercase tracking-[0.25em] font-semibold text-slate-500 mb-2 flex items-center gap-2">
+        <span className="inline-flex h-1 w-1 rounded-full bg-slate-400" />
+        {title}
+      </div>
+      <ul className="flex flex-col divide-y divide-slate-100">
+        {items.map((it) => (
+          <li key={it.to}>
+            <Link
+              to={it.to}
+              data-testid={it.testid}
+              className="flex items-center justify-between py-1.5 text-[12px] text-slate-700 hover:text-slate-900 group"
+            >
+              <span className="truncate">{it.label}</span>
+              <ArrowUpRight
+                size={12}
+                weight="bold"
+                className="text-slate-300 group-hover:text-cyan-600 transition-colors"
+              />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 
 function StatTile({ label, value, loaded }) {
   return (

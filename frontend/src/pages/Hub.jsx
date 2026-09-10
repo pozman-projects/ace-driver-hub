@@ -116,7 +116,7 @@ export default function Hub() {
 
         {/* Command centre body: primary 8 modules + right rail */}
         <div
-          className="grid grid-cols-12 gap-4 lg:gap-5"
+          className="grid grid-cols-12 gap-3"
           data-testid="dashboard-body"
         >
           {/* Primary operational modules — dominant central grid */}
@@ -124,7 +124,7 @@ export default function Hub() {
             className="col-span-12 xl:col-span-9"
             data-testid="primary-modules-section"
           >
-            <div className="mb-3 flex items-baseline justify-between">
+            <div className="mb-2 flex items-baseline justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
                   <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
@@ -136,7 +136,7 @@ export default function Hub() {
               </div>
             </div>
             <div
-              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4 gap-4"
+              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4 gap-3"
               data-testid="module-grid"
             >
               {MODULES.map((mod, i) => {
@@ -147,34 +147,34 @@ export default function Hub() {
                     key={mod.slug}
                     to={`/m/${mod.slug}`}
                     data-testid={`module-card-${mod.slug}`}
-                    className="ace-fade-up bg-white border border-slate-200 rounded-xl p-5 lg:p-6 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-cyan-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left h-full min-h-[172px]"
+                    className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left"
                     style={{ animationDelay: `${i * 40}ms` }}
                   >
-                    <div className="flex items-start justify-between w-full mb-4">
-                      <div className="p-3 bg-cyan-50 rounded-lg text-cyan-700 group-hover:bg-slate-900 group-hover:text-white transition-colors duration-300">
-                        <Icon size={26} weight="regular" />
+                    <div className="flex items-start justify-between w-full mb-2.5">
+                      <div className="p-2 bg-cyan-50 rounded-lg text-cyan-700 group-hover:bg-slate-900 group-hover:text-white transition-colors duration-300">
+                        <Icon size={22} weight="regular" />
                       </div>
                       <ArrowUpRight
-                        size={18}
+                        size={16}
                         weight="bold"
                         className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-300"
                       />
                     </div>
-                    <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1">
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-0.5">
                       Module 0{i + 1}
                     </div>
-                    <h3 className="font-display text-lg lg:text-xl font-semibold text-slate-900 leading-tight mb-1.5">
+                    <h3 className="font-display text-base lg:text-lg font-semibold text-slate-900 leading-tight mb-1">
                       {mod.title}
                     </h3>
-                    <p className="text-xs text-slate-500 leading-snug mb-3 line-clamp-2">
+                    <p className="text-[11px] text-slate-500 leading-snug mb-2 line-clamp-2">
                       {mod.description}
                     </p>
-                    <div className="mt-auto pt-3 border-t border-slate-100 w-full flex items-center justify-between">
+                    <div className="mt-auto pt-2 border-t border-slate-100 w-full flex items-center justify-between">
                       <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
                         Records
                       </span>
                       <span
-                        className="font-display text-xl font-semibold text-slate-900"
+                        className="font-display text-lg font-semibold text-slate-900"
                         data-testid={`module-count-${mod.slug}`}
                       >
                         {count ?? "—"}
@@ -187,10 +187,10 @@ export default function Hub() {
 
             {/* Compact canonical compliance strip */}
             <section
-              className="mt-5"
+              className="mt-3"
               data-testid="canonical-compliance-section"
             >
-              <div className="mb-3 flex items-baseline justify-between">
+              <div className="mb-2 flex items-baseline justify-between">
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-600 flex items-center gap-2">
                     <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-500" />
@@ -244,7 +244,7 @@ export default function Hub() {
 
           {/* Right rail — compact secondary modules */}
           <aside
-            className="col-span-12 xl:col-span-3 flex flex-col gap-4"
+            className="col-span-12 xl:col-span-3 flex flex-col gap-2"
             data-testid="secondary-rail"
           >
             <RailGroup
@@ -372,9 +372,9 @@ function RailGroup({ title, items, testid }) {
   return (
     <div
       data-testid={testid}
-      className="ace-fade-up bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm"
+      className="ace-fade-up bg-white border border-slate-200 rounded-lg px-3 py-2.5 shadow-sm"
     >
-      <div className="text-[9px] uppercase tracking-[0.25em] font-semibold text-slate-500 mb-2 flex items-center gap-2">
+      <div className="text-[9px] uppercase tracking-[0.25em] font-semibold text-slate-500 mb-1.5 flex items-center gap-2">
         <span className="inline-flex h-1 w-1 rounded-full bg-slate-400" />
         {title}
       </div>
@@ -384,11 +384,11 @@ function RailGroup({ title, items, testid }) {
             <Link
               to={it.to}
               data-testid={it.testid}
-              className="flex items-center justify-between py-1.5 text-[12px] text-slate-700 hover:text-slate-900 group"
+              className="flex items-center justify-between py-1 text-[11.5px] text-slate-700 hover:text-slate-900 group"
             >
               <span className="truncate">{it.label}</span>
               <ArrowUpRight
-                size={12}
+                size={11}
                 weight="bold"
                 className="text-slate-300 group-hover:text-cyan-600 transition-colors"
               />

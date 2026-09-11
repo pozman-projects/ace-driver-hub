@@ -52,12 +52,16 @@ SEED_TAG = "seed-eb04"
 
 # Warning window — configurable via env, default 30 days
 WARNING_WINDOW_DAYS = int(os.environ.get("COMPLIANCE_WARNING_DAYS", "30"))
+# EB-R02 · Urgent tier — configurable via env, default 7 days.
+# ONE canonical source. Downstream consumers must NOT hardcode this.
+URGENT_WINDOW_DAYS = int(os.environ.get("COMPLIANCE_URGENT_DAYS", "7"))
 
 
 # ---------------------------------------------------------------- enums
 class ComplianceStatus(str, Enum):
     Compliant = "Compliant"
     DueSoon = "Due Soon"
+    Urgent = "Urgent"
     Expired = "Expired"
     Missing = "Missing"
     Incomplete = "Incomplete"
@@ -130,6 +134,7 @@ STATUS_SEVERITY: Dict[str, int] = {
     ComplianceStatus.Compliant.value: 10,
     ComplianceStatus.DueSoon.value: 20,
     ComplianceStatus.UnderReview.value: 25,
+    ComplianceStatus.Urgent.value: 28,
     ComplianceStatus.Incomplete.value: 30,
     ComplianceStatus.Missing.value: 40,
     ComplianceStatus.Expired.value: 50,
@@ -162,17 +167,68 @@ def _parse_date(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def _classify_expiry(expiry: Optional[str], warning_days: int = WARNING_WINDOW_DAYS) -> str:
-    """Map an expiry date to Compliant / Due Soon / Expired / Incomplete."""
+def _classify_expiry(
+    expiry: Optional[str],
+    warning_days: int = WARNING_WINDOW_DAYS,
+    urgent_days: int = URGENT_WINDOW_DAYS,
+) -> str:
+    """EB-R02 canonical expiry classifier for Licence / Registration /
+    Insurance. Missing or unparsable expiry ALWAYS returns Incomplete
+    (never Compliant). Uses calendar-day logic.
+    """
     d = _parse_date(expiry)
     if not d:
         return ComplianceStatus.Incomplete.value
     delta = (d.date() - datetime.now(timezone.utc).date()).days
     if delta < 0:
         return ComplianceStatus.Expired.value
+    if delta <= urgent_days:
+        return ComplianceStatus.Urgent.value
     if delta <= warning_days:
         return ComplianceStatus.DueSoon.value
     return ComplianceStatus.Compliant.value
+
+
+def _days_remaining(expiry: Optional[str]) -> Optional[int]:
+    """Return integer calendar days until expiry, or None if unparsable."""
+    d = _parse_date(expiry)
+    if not d:
+        return None
+    return (d.date() - datetime.now(timezone.utc).date()).days
+
+
+# EB-R02 · Vehicle Compliance component translation.
+# Expiry-domain labels (Current/DueSoon/Urgent/Expired) must NOT be
+# used as the top-level Vehicle Compliance component outcome. Blueprint
+# semantics: Compliant / Conditions / Non-Compliant / Not Applicable.
+_VC_COMPONENT_MAP: Dict[str, str] = {
+    ComplianceStatus.Compliant.value: "Compliant",
+    ComplianceStatus.UnderReview.value: "Compliant",
+    ComplianceStatus.DueSoon.value: "Conditions",
+    ComplianceStatus.Urgent.value: "Conditions",
+    ComplianceStatus.Expired.value: "Non-Compliant",
+    ComplianceStatus.Missing.value: "Non-Compliant",
+    ComplianceStatus.Incomplete.value: "Non-Compliant",
+    ComplianceStatus.NotApplicable.value: "Not Applicable",
+}
+
+
+def _to_vc_component(status: Optional[str]) -> str:
+    """Translate a canonical component compliance status into the
+    Blueprint Vehicle Compliance semantics."""
+    return _VC_COMPONENT_MAP.get(status or "", "Non-Compliant")
+
+
+def _worst_vc(component_statuses: List[str]) -> str:
+    """Vehicle Compliance Worst Status Wins.
+    Order: Non-Compliant > Conditions > Compliant. Not Applicable is
+    excluded from the comparison. If all are Not Applicable, returns
+    Not Applicable."""
+    rank = {"Compliant": 1, "Conditions": 2, "Non-Compliant": 3}
+    ranked = [s for s in component_statuses if s and s != "Not Applicable"]
+    if not ranked:
+        return "Not Applicable" if component_statuses else "Not Applicable"
+    return max(ranked, key=lambda s: rank.get(s, 0))
 
 
 def _require_write(user):
@@ -936,13 +992,28 @@ class _ComplianceService:
             (c.get("component") for c in components if c.get("status") == worst.get("status") and c.get("severity") == worst.get("severity")),
             None,
         )
+        # EB-R02 · Vehicle Compliance Blueprint semantics
+        # (Compliant / Conditions / Non-Compliant / Not Applicable).
+        # Component-level VC output uses _to_vc_component; overall uses
+        # canonical WSW over VC-translated components.
+        vc_components = [_to_vc_component(c.get("status")) for c in components]
+        overall_vc_status = _worst_vc(vc_components)
+        # Prime Mover: proven from canonical vehicle_type. Tray and
+        # Trailer are NOT YET AVAILABLE as canonical component outputs
+        # (no canonical role marker exists).
+        prime_mover_status = overall_vc_status if (vehicle.get("vehicle_type") == "Prime Mover") else "Not Applicable"
         return {
             "vehicle_id": vehicle_id,
             "registration_number": vehicle.get("registration_number"),
+            "vehicle_type": vehicle.get("vehicle_type"),
             "overall_status": worst.get("status"),
             "severity": worst.get("severity", 0),
             "components": components,
             "worst_component": worst_component,
+            "overall_vehicle_compliance_status": overall_vc_status,
+            "prime_mover_status": prime_mover_status,
+            "tray_status": "Not yet available",
+            "trailer_status": "Not yet available",
             "calculated_at": _iso(),
         }
 
@@ -1287,6 +1358,18 @@ def build_compliance_router(db, get_current_user):
     svc = _ComplianceService(db)
 
     # ---- helper for generic list/put/delete used across records
+    # Collections whose records carry an expiry_date and must expose
+    # EB-R02 calculated intelligence (calculated_status + days_remaining)
+    # on every read, regardless of stored status value.
+    _EXPIRY_ENRICH_COLLS = {LICENCES_COLL, REGISTRATIONS_COLL, INSURANCE_COLL}
+
+    def _enrich_expiry(coll_name: str, doc: Dict[str, Any]) -> Dict[str, Any]:
+        if coll_name in _EXPIRY_ENRICH_COLLS and doc is not None:
+            exp = doc.get("expiry_date")
+            doc["calculated_status"] = _classify_expiry(exp)
+            doc["days_remaining"] = _days_remaining(exp)
+        return doc
+
     def _make_list(coll_name: str):
         async def handler(
             driver_id: Optional[str] = None,
@@ -1307,7 +1390,8 @@ def build_compliance_router(db, get_current_user):
                 q["status"] = status
             if not include_archived:
                 q["is_archived"] = {"$ne": True}
-            return await db[coll_name].find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+            rows = await db[coll_name].find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+            return [_enrich_expiry(coll_name, r) for r in rows]
 
         return handler
 
@@ -1316,7 +1400,7 @@ def build_compliance_router(db, get_current_user):
             doc = await db[coll_name].find_one({"id": record_id}, {"_id": 0})
             if not doc:
                 raise HTTPException(status_code=404, detail=f"{id_label} not found")
-            return doc
+            return _enrich_expiry(coll_name, doc)
 
         return handler
 
@@ -1375,6 +1459,9 @@ def build_compliance_router(db, get_current_user):
         if not existing:
             raise HTTPException(status_code=404, detail="Licence not found")
         updates = payload.model_dump(mode="json", exclude_unset=True)
+        # EB-R02 · calculated status is system-owned. Ignore any
+        # user-supplied status on update.
+        updates.pop("status", None)
         # If flipping to primary, close previous primary
         if updates.get("is_primary") is True:
             await db[LICENCES_COLL].update_many(
@@ -1406,6 +1493,8 @@ def build_compliance_router(db, get_current_user):
         if not existing:
             raise HTTPException(status_code=404, detail="Registration not found")
         updates = payload.model_dump(mode="json", exclude_unset=True)
+        # EB-R02 · calculated status is system-owned.
+        updates.pop("status", None)
         if updates.get("is_current") is True:
             await db[REGISTRATIONS_COLL].update_many(
                 {"vehicle_id": existing["vehicle_id"], "id": {"$ne": record_id}, "is_current": True, "is_archived": {"$ne": True}},
@@ -1436,6 +1525,8 @@ def build_compliance_router(db, get_current_user):
         if not existing:
             raise HTTPException(status_code=404, detail="Insurance not found")
         updates = payload.model_dump(mode="json", exclude_unset=True)
+        # EB-R02 · calculated status is system-owned.
+        updates.pop("status", None)
         if updates.get("is_current") is True:
             await db[INSURANCE_COLL].update_many(
                 {
@@ -1635,6 +1726,7 @@ def build_compliance_router(db, get_current_user):
         """Canonical compliance overview. Aggregates per-driver/vehicle/equipment summaries."""
         results = {
             "warning_window_days": WARNING_WINDOW_DAYS,
+            "urgent_window_days": URGENT_WINDOW_DAYS,
             "drivers": [],
             "vehicles": [],
             "equipment": [],

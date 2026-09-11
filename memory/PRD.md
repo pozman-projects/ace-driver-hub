@@ -1730,3 +1730,60 @@ production, no `main` change, no real ACE data migration.
 - No real ACE data migration. No `main` change. No production deploy.
 - No multi-trailer positional logic. `carrier_configuration` remains
   descriptive metadata only, not used for identity or coupling inference.
+
+---
+
+## EB-R03A — Production Storage Integrity (2026-02-26)
+
+**Scope**: Route all document byte-writes AND byte-reads through the canonical
+`StorageAdapter` (already implemented as `LocalStorageAdapter` in dev and
+`S3CompatibleStorageAdapter` in production). Ensure generated Driver Start
+Sheet / Driver Profile PDFs are persisted through the same adapter, and that
+`storage_provider` metadata records the actual adapter provider (never the
+legacy placeholder `"local-dev"`). Storage-only fix; no UX, taxonomy,
+compliance, activation, notification or numbering change.
+
+### Backend
+- `backend/documents_module.py`
+  * Added `_get_storage_adapter()` / `_storage_provider_name()` accessor
+    (module-scoped cache; delegates to `storage_module._build_adapter_from_env`).
+  * Upload path (`_validate_and_persist`) now calls the canonical adapter's
+    `put(key, bytes, content_type)`; metadata records the actual provider.
+  * Seed writes routed through the adapter; seed metadata records the actual
+    provider.
+  * Download / preview paths (`_serve` + `_stream_from_adapter`) stream via
+    `adapter.stream(key)`. S3 keys are never resolved as pod-local filesystem
+    paths. Missing objects return controlled `410 File missing from storage`;
+    other adapter errors return controlled `502 Storage read failed` — no
+    stack traces, no path leakage, no silent fallback.
+  * Failure safety: on adapter write failure, `_validate_and_persist` raises
+    `500 Upload failed: {ErrorType}` BEFORE any metadata is written, so no
+    document/version row can claim success when bytes are not durably stored.
+- `backend/driver_export_module.py`
+  * Generated PDF now persisted via `adapter.put(storage_key, pdf_bytes, "application/pdf")`
+    with the actual adapter provider recorded on both `documents` and
+    `document_versions`.
+  * `read_pdf_bytes(version_id)` reads via adapter, not `STORAGE_ROOT` path.
+  * On adapter write failure, an `HTTPException(500)` is raised BEFORE any
+    metadata row is inserted.
+- No parallel storage abstraction created. No new S3 client. No new bucket,
+  region, credentials or CORS config touched. Provider selection remains
+  driven by `DOCUMENT_STORAGE_BACKEND` env.
+
+### Metadata fix
+- All three legacy occurrences of `"storage_provider": "local-dev"` replaced
+  with the actual adapter provider (`local` in dev; `s3` in production).
+
+### Tests
+- `backend/tests/test_ebr03a_storage_integrity.py` — 8 acceptance tests.
+  All pass against the live backend.
+- Storage-adjacent regression: **90 passed** across `test_documents_eb05.py`,
+  `test_driver_exports_eb11.py`, `test_storage_eb13.py`, and the new suite.
+
+### Not changed
+- Document taxonomy / categories / UX untouched.
+- PDF content / snapshot logic / version history / verification-reference logic
+  untouched.
+- No `main` write. No Production deploy. No real ACE data migration.
+- No AWS credentials rotated. No bucket, region, prefix or CORS changed.
+- No scheduler enabled. No live email / SMS enabled.

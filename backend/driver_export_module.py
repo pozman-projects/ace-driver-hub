@@ -692,9 +692,20 @@ class ExportService:
             version_id = _uuid()
             safe_name = f"{export_type.replace(' ', '_')}_{driver_id[:8]}_v{version_number}.pdf"
             storage_key = f"exports/{driver_id[:2]}/{driver_id}/{document_id}_{version_id}.pdf"
-            dest = STORAGE_ROOT / storage_key
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(pdf_bytes)
+            # EB-R03A · Persist generated PDF via canonical storage adapter.
+            # LocalStorageAdapter in dev, S3CompatibleStorageAdapter in
+            # production. No pod-local final dependency.
+            try:
+                from storage_module import _build_adapter_from_env
+                _adapter, _ = _build_adapter_from_env()
+                _adapter.put(storage_key, pdf_bytes, "application/pdf")
+            except Exception as e:  # noqa: BLE001
+                # Do not persist metadata claiming success on failure.
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Export storage write failed: {type(e).__name__}",
+                )
+            _storage_provider_value = _adapter.provider
 
             uploaded_at = _iso()
             version_doc = {
@@ -707,7 +718,7 @@ class ExportService:
                 "file_extension": "pdf",
                 "file_size_bytes": file_size,
                 "checksum_sha256": checksum,
-                "storage_provider": "local-dev",
+                "storage_provider": _storage_provider_value,
                 "storage_key": storage_key,
                 "uploaded_at": uploaded_at,
                 "uploaded_by": actor,
@@ -738,7 +749,7 @@ class ExportService:
                 "file_extension": "pdf",
                 "file_size_bytes": file_size,
                 "checksum_sha256": checksum,
-                "storage_provider": "local-dev",
+                "storage_provider": _storage_provider_value,
                 "storage_key": storage_key,
                 "uploaded_at": uploaded_at,
                 "uploaded_by": actor,
@@ -890,10 +901,15 @@ class ExportService:
         key = doc_v.get("storage_key")
         if not key:
             return None
-        path = STORAGE_ROOT / key
-        if not path.exists():
+        # EB-R03A · Read through canonical adapter, never pod-local path.
+        try:
+            from storage_module import _build_adapter_from_env
+            _adapter, _ = _build_adapter_from_env()
+            return _adapter.get(key)
+        except FileNotFoundError:
             return None
-        return path.read_bytes()
+        except Exception:  # noqa: BLE001
+            return None
 
     async def archive_version(self, version_id: str, user: Dict[str, Any]) -> dict:
         v = await self.get_version(version_id)

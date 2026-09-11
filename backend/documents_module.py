@@ -79,6 +79,26 @@ STORAGE_ROOT = Path(os.environ.get("DOCUMENT_STORAGE_PATH", "/app/backend/docume
 STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+# EB-R03A · Canonical storage adapter accessor.
+# Routes ALL byte-writes and byte-reads through the authoritative
+# StorageAdapter (LocalStorageAdapter in dev, S3CompatibleStorageAdapter
+# in production) so preview/download never resolves an S3 key as a
+# pod-local filesystem path.
+_STORAGE_ADAPTER = None
+
+
+def _get_storage_adapter():
+    global _STORAGE_ADAPTER
+    if _STORAGE_ADAPTER is None:
+        from storage_module import _build_adapter_from_env
+        _STORAGE_ADAPTER, _ = _build_adapter_from_env()
+    return _STORAGE_ADAPTER
+
+
+def _storage_provider_name() -> str:
+    return _get_storage_adapter().provider
+
+
 # ---------------------------------------------------------------- enums
 class DocumentStatus(str, Enum):
     Active = "Active"
@@ -339,7 +359,6 @@ async def _validate_and_persist(upload: UploadFile, actor_email: str, document_i
             raise UploadValidationError(f"Declared MIME '{declared_mime}' does not match extension .{ext}")
 
     key = _storage_key(document_id, version_number, ext)
-    dest = _storage_path(key)
     sha = hashlib.sha256()
     size = 0
     head = b""
@@ -362,26 +381,18 @@ async def _validate_and_persist(upload: UploadFile, actor_email: str, document_i
             raise UploadValidationError("Zero-byte file rejected")
         if not _sniff_content(head, ext):
             raise UploadValidationError(f"File content does not match extension .{ext}")
-        # EB-13 · Route the byte-write through the private object-storage
-        # adapter. The adapter (LocalStorageAdapter in dev, S3-compatible
-        # in production) owns all persistence; documents_module never
-        # writes to pod-local disk at runtime.
-        from storage_module import _build_adapter_from_env
-        _adapter, _ = _build_adapter_from_env()
-        _adapter.put(key, bytes(buf),
-                      content_type=declared_mime or ALLOWED_EXTENSIONS[ext][0])
+        # EB-R03A · Persist bytes through the canonical storage adapter.
+        # LocalStorageAdapter in dev, S3CompatibleStorageAdapter in
+        # production. documents_module never writes to pod-local disk.
+        _get_storage_adapter().put(
+            key, bytes(buf),
+            content_type=declared_mime or ALLOWED_EXTENSIONS[ext][0],
+        )
     except UploadValidationError:
-        try:
-            dest.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001
-            pass
         raise
     except Exception as e:  # noqa: BLE001
-        try:
-            dest.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001
-            pass
-        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+        # EB-R03A · Do not persist metadata claiming success on failure.
+        raise HTTPException(status_code=500, detail=f"Upload failed: {type(e).__name__}")
 
     return {
         "original_filename": original,
@@ -390,7 +401,7 @@ async def _validate_and_persist(upload: UploadFile, actor_email: str, document_i
         "file_extension": ext,
         "file_size_bytes": size,
         "checksum_sha256": sha.hexdigest(),
-        "storage_provider": "local-dev",
+        "storage_provider": _storage_provider_name(),
         "storage_key": key,
         "uploaded_at": _iso(),
         "uploaded_by": actor_email,
@@ -437,7 +448,9 @@ async def seed_documents(db):
         doc_id = str(uuid.uuid4())
         version_id = str(uuid.uuid4())
         key = _storage_key(doc_id, 1, ext)
-        _storage_path(key).write_bytes(content)
+        # EB-R03A · Seed writes go through the canonical adapter too, so
+        # dev seed and production seed resolve identically at read time.
+        _get_storage_adapter().put(key, content, ALLOWED_EXTENSIONS[ext][0])
         sha = hashlib.sha256(content).hexdigest()
         now = _iso()
         version = {
@@ -449,7 +462,7 @@ async def seed_documents(db):
             "file_extension": ext,
             "file_size_bytes": len(content),
             "checksum_sha256": sha,
-            "storage_provider": "local-dev",
+            "storage_provider": _storage_provider_name(),
             "storage_key": key,
             "uploaded_at": now,
             "uploaded_by": "system-seed",
@@ -477,7 +490,7 @@ async def seed_documents(db):
             "file_extension": ext,
             "file_size_bytes": len(content),
             "checksum_sha256": sha,
-            "storage_provider": "local-dev",
+            "storage_provider": _storage_provider_name(),
             "storage_key": key,
             "uploaded_at": now,
             "uploaded_by": "system-seed",
@@ -876,18 +889,21 @@ def build_documents_router(db, get_current_user):
         return _strip_storage_v(v)
 
     # ---------------- DOWNLOAD / PREVIEW ----------------
-    def _stream_file(path: Path, mime: str, filename: str, inline: bool):
-        if not path.exists():
+    def _stream_from_adapter(key: str, mime: str, filename: str, inline: bool):
+        # EB-R03A · Bytes are always retrieved through the canonical
+        # storage adapter. Never resolves an S3 key against the local
+        # filesystem. Preserves streaming for large objects.
+        adapter = _get_storage_adapter()
+        try:
+            gen = adapter.stream(key)
+        except FileNotFoundError:
             raise HTTPException(status_code=410, detail="File missing from storage")
-        def gen():
-            with path.open("rb") as f:
-                while True:
-                    chunk = f.read(1024 * 64)
-                    if not chunk:
-                        break
-                    yield chunk
+        except HTTPException:
+            raise
+        except Exception:  # noqa: BLE001 — controlled error; no path/secret leakage
+            raise HTTPException(status_code=502, detail="Storage read failed")
         disp = f'{"inline" if inline else "attachment"}; filename="{filename}"'
-        return StreamingResponse(gen(), media_type=mime, headers={"Content-Disposition": disp, "Cache-Control": "private, no-store"})
+        return StreamingResponse(gen, media_type=mime, headers={"Content-Disposition": disp, "Cache-Control": "private, no-store"})
 
     async def _serve(doc: Dict[str, Any], version: Dict[str, Any], user, action: AccessAction, inline: bool, request: Request):
         if not _visible_by_sensitivity(user.get("role", ""), doc.get("sensitivity", Sensitivity.Standard.value)):
@@ -896,12 +912,15 @@ def build_documents_router(db, get_current_user):
             raise HTTPException(status_code=403, detail="Sensitivity restricts this document for your role")
         if doc.get("is_archived") or version.get("is_archived"):
             raise HTTPException(status_code=410, detail="Document archived")
-        path = _storage_path(version["storage_key"])
         await _write_access_event(db, doc["id"], version["id"], user, action, AccessResult.Success,
                                    ip=(request.client.host if request.client else None),
                                    ua=request.headers.get("user-agent"))
-        return _stream_file(path, version.get("mime_type", "application/octet-stream"),
-                            version.get("original_filename", "file"), inline)
+        return _stream_from_adapter(
+            version["storage_key"],
+            version.get("mime_type", "application/octet-stream"),
+            version.get("original_filename", "file"),
+            inline,
+        )
 
     @router.get("/documents/{document_id}/download")
     async def download_current(document_id: str, request: Request, current=Depends(get_current_user)):

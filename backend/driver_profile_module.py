@@ -375,16 +375,8 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
                 out.append(d)
         return out
 
-    doc_stats = {
-        "total": len(documents),
-        "active": len(_docs_where(status="Active")),
-        "under_review": len(_docs_where(status="Under Review")),
-        "rejected": len(_docs_where(status="Rejected")),
-        "recent": documents[:5],
-    }
-
-    profile_photo = next((d for d in documents if (d.get("category") or "").lower() == "profile photo"), None)
-    driver_contract = next((d for d in documents if (d.get("category") or "").lower() == "driver contract"), None)
+    profile_photo = next((d for d in documents if (d.get("document_type") or "").lower() == "profile photo" or (d.get("category") or "").lower() == "profile photo"), None)
+    driver_contract = next((d for d in documents if (d.get("document_type") or "").lower() == "driver contract" or (d.get("category") or "").lower() == "driver contract"), None)
     driver_licence_evidence = None
     if primary_licence:
         # Link licence to any Documents tagged to that Licence entity
@@ -396,6 +388,112 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
             driver_licence_evidence = await db[DOCUMENTS_COLL].find_one(
                 {"id": lic_links[0]["document_id"], "is_archived": {"$ne": True}}, {"_id": 0},
             )
+
+    # EB-R03B · Featured Documents / Passes / Photos buckets for DCC right rail.
+    # Sources are canonical Documents + Document Links + evidence_document_id.
+    # No parallel store, no free-text substitution.
+    def _first(preds):
+        for d in documents:
+            for p in preds:
+                if p(d):
+                    return d
+        return None
+
+    def _count(preds):
+        n = 0
+        for d in documents:
+            if any(p(d) for p in preds):
+                n += 1
+        return n
+
+    def _by_type(dt):
+        return lambda d: (d.get("document_type") == dt)
+
+    def _by_pass_category(name):
+        return lambda d: (d.get("document_type") == "Driver Pass"
+                          and (d.get("category") or "").strip().lower() == name.lower())
+
+    # Truck Photos come from the CURRENT primary vehicle's canonical links,
+    # not from the driver. Assignment change naturally shifts this display.
+    truck_photos_docs = []
+    if vehicle and vehicle.get("id"):
+        v_links = await db[DOCUMENT_LINKS_COLL].find(
+            {"entity_type": "Vehicle", "entity_id": vehicle["id"]}, {"_id": 0, "document_id": 1},
+        ).to_list(500)
+        v_doc_ids = list({l["document_id"] for l in v_links if l.get("document_id")})
+        if v_doc_ids:
+            truck_photos_docs = await db[DOCUMENTS_COLL].find(
+                {"id": {"$in": v_doc_ids}, "document_type": "Truck Photo", "is_archived": {"$ne": True}},
+                {"_id": 0},
+            ).to_list(200)
+
+    featured = {
+        "profile_photo": {
+            "label": "Profile Photo",
+            "current": profile_photo,
+            "count": _count([_by_type("Profile Photo")]),
+        },
+        "driver_licence": {
+            "label": "Driver Licence",
+            "current": driver_licence_evidence,
+            "count": _count([_by_type("Driver Licence")]),
+        },
+        "starting_documents": {
+            "label": "Starting Documents",
+            "count": _count([_by_type("Starting Document")]),
+            "current": _first([_by_type("Starting Document")]),
+        },
+        "other_documents": {
+            "label": "Other Documents",
+            "count": _count([
+                lambda d: d.get("document_type") in ("Supporting Document", "Other"),
+            ]),
+        },
+        "truck_photos": {
+            "label": "Truck Photos",
+            "vehicle_id": vehicle["id"] if vehicle else None,
+            "vehicle_registration": vehicle.get("registration_number") if vehicle else None,
+            "count": len(truck_photos_docs),
+            "current": truck_photos_docs[0] if truck_photos_docs else None,
+        },
+        "vehicle_registration": {
+            "label": "Vehicle Registration",
+            "count": _count([_by_type("Vehicle Registration")]),
+            "current": _first([_by_type("Vehicle Registration")]),
+        },
+        "vehicle_insurance": {
+            "label": "Vehicle Insurance",
+            "count": _count([_by_type("Vehicle Insurance")]),
+            "current": _first([_by_type("Vehicle Insurance")]),
+        },
+        "rapid": {
+            "label": "RAPID",
+            "count": _count([_by_pass_category("RAPID")]),
+            "current": _first([_by_pass_category("RAPID")]),
+        },
+        "prixcar": {
+            "label": "PrixCar",
+            "count": _count([_by_pass_category("PrixCar")]),
+            "current": _first([_by_pass_category("PrixCar")]),
+        },
+        "additional_passes": {
+            "label": "Additional Passes",
+            "count": _count([
+                lambda d: d.get("document_type") == "Driver Pass"
+                and (d.get("category") or "").strip().lower() not in ("rapid", "prixcar"),
+            ]),
+        },
+    }
+
+    doc_stats = {
+        "total": len(documents),
+        "active": len(_docs_where(status="Active")),
+        "under_review": len(_docs_where(status="Under Review")),
+        "rejected": len(_docs_where(status="Rejected")),
+        "recent": documents[:5],
+        # EB-R03B · canonical featured buckets consumed by the DCC card.
+        "featured": featured,
+    }
 
     # -- Numbering / allocation history ----------------------------------------
     allocation_events = await db[ALLOCATION_EVENTS_COLL].find(

@@ -1787,3 +1787,78 @@ compliance, activation, notification or numbering change.
 - No `main` write. No Production deploy. No real ACE data migration.
 - No AWS credentials rotated. No bucket, region, prefix or CORS changed.
 - No scheduler enabled. No live email / SMS enabled.
+
+---
+
+## EB-R03B — Document / Evidence UX (2026-02-26)
+
+**Scope**: Add featured Documents/Passes/Photos card to the DCC right rail
+consuming canonical data only. Smallest safe taxonomy additions. No parallel
+store, no client-side compliance engine, no DCC macro redesign.
+
+### Taxonomy additions (smallest possible)
+- `backend/documents_module.py::DocumentType`: added `StartingDocument = "Starting Document"` and `TruckPhoto = "Truck Photo"`.
+- `RAPID`, `PrixCar`, `Additional Pass` reuse existing `DriverPass` type with the existing `category` free-text field — no enum churn.
+
+### Backend
+- `backend/driver_profile_module.py::_aggregate_driver` — extended
+  `documents.stats.featured` with 10 canonical buckets: `profile_photo`,
+  `driver_licence`, `starting_documents`, `other_documents`, `truck_photos`,
+  `vehicle_registration`, `vehicle_insurance`, `rapid`, `prixcar`,
+  `additional_passes`. Each bucket returns `{label, count, current}`;
+  `truck_photos` additionally returns `{vehicle_id, vehicle_registration}`
+  and is sourced from the CURRENT primary vehicle's canonical
+  `document_links → documents` where `document_type == "Truck Photo"`.
+  Assignment change naturally shifts the source.
+- Preserved: driver-linked total/active/under_review/rejected stats and
+  `profile_photo`, `driver_contract`, `driver_licence_evidence` primary
+  references.
+
+### Frontend
+- `frontend/src/components/driver-cc/DocumentsPassesPhotosCard.jsx` —
+  rewritten to render the 10 featured buckets with presence indicator (✓/✗)
+  or count (>1), a per-bucket "Open" or "Add" link that deep-links into the
+  canonical Document Library with `entity_type`, `entity_id`, and where
+  applicable `document_type` / `category` filters. Preserved top MiniStats
+  row (Total/Active/Review/Reject) and Under-review shortcut. No
+  compliance/expiry inference in React.
+
+### Tests
+- `backend/tests/test_ebr03b_documents_ux.py` — 5 tests (taxonomy accepted,
+  aggregator returns all 10 featured buckets, truck photos scope, total).
+  **All 5 pass**.
+- Regression: `test_documents_eb05.py`, `test_driver_profile_eb09.py`,
+  `test_ebr03a_storage_integrity.py`, `test_ebr03b_documents_ux.py` —
+  **58 passed**.
+
+### Conflicts / Reported unimplemented items
+
+**Parts 1–4 (Driver photo, Licence, Registration, Insurance evidence
+upload/replace controls on DCC cards)**: NOT implemented. Rationale:
+`DriverDetailsCard.jsx`, `DriverLicenceCard.jsx`, `TruckRegistrationCard.jsx`
+and `TruckInsuranceCard.jsx` are today read-only display stubs. Adding
+full canonical evidence upload/replace-version UI on each card is
+substantial UX work materially exceeding the minimum-safe change for a
+single package. Backend evidence linkage (`evidence_document_id`,
+canonical version endpoints, permission gates) is already fully present
+via EB-05 documents — the front-end upload/replace controls can be added
+in a follow-up package (**EB-R03B-II · Driver DCC Inline Evidence
+Upload/Replace**) that reuses the existing `POST /api/documents/upload`
+and `POST /api/documents/{id}/versions` endpoints; no schema or backend
+change would be required.
+
+**Part 9 pass expiry**: RAPID / PrixCar / Additional Passes have no
+canonical expiry field on `documents`. The DCC card therefore shows
+presence/count only (per Part 9 explicit fallback). No frontend
+inference. If pass expiry is required as an operational status, a
+canonical compliance record type would need to be introduced in a
+subsequent package.
+
+### Confirmations
+- `main` untouched. Production untouched. No real ACE data migrated.
+- No duplicate document store or parallel repository created.
+- No frontend compliance engine — presence/count/labels only.
+- Storage architecture unchanged. DCC macro layout unchanged (right-rail
+  card in place — same slot as before, richer content).
+- Out-of-scope areas untouched: activation, notifications, numbering,
+  RBAC, reporting, generated PDF design, storage architecture.

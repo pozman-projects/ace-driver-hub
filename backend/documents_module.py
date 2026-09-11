@@ -127,6 +127,11 @@ class DocumentType(str, Enum):
     DriverContract = "Driver Contract"
     DriverPass = "Driver Pass"
     ProfilePhoto = "Profile Photo"
+    # EB-R03B · Smallest taxonomy additions required to feature the DCC
+    # "Documents, Passes & Photos" categories per Blueprint. No parallel
+    # store; these are canonical DocumentType members exactly like the rest.
+    StartingDocument = "Starting Document"
+    TruckPhoto = "Truck Photo"
     SupportingDocument = "Supporting Document"
     Other = "Other"
 

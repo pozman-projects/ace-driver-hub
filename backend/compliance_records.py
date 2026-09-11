@@ -997,11 +997,52 @@ class _ComplianceService:
         # Component-level VC output uses _to_vc_component; overall uses
         # canonical WSW over VC-translated components.
         vc_components = [_to_vc_component(c.get("status")) for c in components]
-        overall_vc_status = _worst_vc(vc_components)
-        # Prime Mover: proven from canonical vehicle_type. Tray and
-        # Trailer are NOT YET AVAILABLE as canonical component outputs
-        # (no canonical role marker exists).
-        prime_mover_status = overall_vc_status if (vehicle.get("vehicle_type") == "Prime Mover") else "Not Applicable"
+        vehicle_own_vc = _worst_vc(vc_components)
+        prime_mover_status = vehicle_own_vc if (vehicle.get("vehicle_type") == "Prime Mover") else "Not Applicable"
+
+        # EB-R02C · Tray / Trailer statuses via canonical Vehicle↔Equipment couplings.
+        # No coupling for a role => "Not Applicable" (V1: Tray/Trailer optional per vehicle).
+        # A coupled Tray/Trailer's status is derived from its own canonical Equipment
+        # compliance summary, translated through _to_vc_component.
+        VEC_COLL = "vehicle_equipment_couplings"
+        tray_status = "Not Applicable"
+        trailer_status = "Not Applicable"
+        tray_coupled = False
+        trailer_coupled = False
+        tray_coupling = await self.db[VEC_COLL].find_one(
+            {"vehicle_id": vehicle_id, "role": "Tray", "is_active": True, "is_archived": {"$ne": True}},
+            {"_id": 0},
+        )
+        if tray_coupling:
+            tray_coupled = True
+            try:
+                tray_sum = await self.equipment_summary(tray_coupling["equipment_id"])
+                tray_status = _to_vc_component(tray_sum.get("overall_status"))
+            except HTTPException:
+                tray_status = "Non-Compliant"
+
+        trailer_coupling = await self.db[VEC_COLL].find_one(
+            {"vehicle_id": vehicle_id, "role": "Trailer", "is_active": True, "is_archived": {"$ne": True}},
+            {"_id": 0},
+        )
+        if trailer_coupling:
+            trailer_coupled = True
+            try:
+                trailer_sum = await self.equipment_summary(trailer_coupling["equipment_id"])
+                trailer_status = _to_vc_component(trailer_sum.get("overall_status"))
+            except HTTPException:
+                trailer_status = "Non-Compliant"
+
+        # Overall Vehicle Compliance:
+        #   - Prime Movers: WSW across [prime_mover_status, tray_status, trailer_status]
+        #     per Blueprint. This composes the coupled-set roll-up.
+        #   - Non-Prime-Movers: preserve pre-existing semantics (vehicle_own_vc)
+        #     so that a Rigid's own compliance is not silently dropped when no
+        #     couplings exist.
+        if vehicle.get("vehicle_type") == "Prime Mover":
+            overall_vc_status = _worst_vc([prime_mover_status, tray_status, trailer_status])
+        else:
+            overall_vc_status = vehicle_own_vc
         return {
             "vehicle_id": vehicle_id,
             "registration_number": vehicle.get("registration_number"),
@@ -1012,8 +1053,12 @@ class _ComplianceService:
             "worst_component": worst_component,
             "overall_vehicle_compliance_status": overall_vc_status,
             "prime_mover_status": prime_mover_status,
-            "tray_status": "Not yet available",
-            "trailer_status": "Not yet available",
+            "tray_status": tray_status,
+            "trailer_status": trailer_status,
+            "tray_coupled": tray_coupled,
+            "trailer_coupled": trailer_coupled,
+            "tray_equipment_id": tray_coupling.get("equipment_id") if tray_coupling else None,
+            "trailer_equipment_id": trailer_coupling.get("equipment_id") if trailer_coupling else None,
             "calculated_at": _iso(),
         }
 
@@ -1771,11 +1816,22 @@ def build_compliance_router(db, get_current_user):
                     results["drivers"].append(s)
 
         if include_types is None or "vehicle" in include_types:
+            fleet_vals = {"prime_mover_status": [], "tray_status": [], "trailer_status": [], "overall_vehicle_compliance_status": []}
             async for v in db[VEHICLES_COLL].find(veh_q, {"_id": 0, "id": 1}):
                 s = await svc.vehicle_summary(v["id"])
                 results["totals"]["vehicles"][s["overall_status"]] = results["totals"]["vehicles"].get(s["overall_status"], 0) + 1
+                for k in fleet_vals.keys():
+                    val = s.get(k)
+                    if val:
+                        fleet_vals[k].append(val)
                 if _matches(s):
                     results["vehicles"].append(s)
+            # EB-R02C · Fleet-level canonical Vehicle Compliance aggregate.
+            # Backend-only WSW; no frontend calculation.
+            results["fleet_vehicle_compliance"] = {
+                k: _worst_vc(vals) if vals else "Not Applicable"
+                for k, vals in fleet_vals.items()
+            }
 
         if include_types is None or "equipment" in include_types:
             async for e in db[EQUIPMENT_COLL].find(eq_q, {"_id": 0, "id": 1}):

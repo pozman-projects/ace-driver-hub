@@ -304,8 +304,8 @@ class TestVehicleCompliance:
         s = api.get(f"{BASE_URL}/api/compliance/vehicles/{vid}", timeout=15).json()
         assert s.get("overall_vehicle_compliance_status") == "Compliant", s
         assert s.get("prime_mover_status") == "Compliant"
-        assert s.get("tray_status") == "Not yet available"
-        assert s.get("trailer_status") == "Not yet available"
+        assert s.get("tray_status") == "Not Applicable"
+        assert s.get("trailer_status") == "Not Applicable"
 
     def test_due_soon_yields_conditions(self, api):
         r = api.post(
@@ -364,8 +364,8 @@ class TestVehicleCompliance:
         _create_inspection(api, rigid_vehicle_id, _iso_days(120))
         s = api.get(f"{BASE_URL}/api/compliance/vehicles/{rigid_vehicle_id}", timeout=15).json()
         assert s.get("prime_mover_status") == "Not Applicable", s
-        assert s.get("tray_status") == "Not yet available"
-        assert s.get("trailer_status") == "Not yet available"
+        assert s.get("tray_status") == "Not Applicable"
+        assert s.get("trailer_status") == "Not Applicable"
 
 
 # ---------------------------------------------------------------- I. List rows enriched

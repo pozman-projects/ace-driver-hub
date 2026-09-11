@@ -1641,3 +1641,92 @@ execution framework only**. It grants NO permission to:
 ### Boundary Re-affirmed
 No real ACE data imported, no live providers enabled, no public webhook
 activation, no production deploy, no GitHub push, `main` untouched.
+
+---
+
+## EB-R02C — Vehicle Lifecycle + Vehicle↔Equipment Coupling (2026-02-26)
+
+**Scope**: Reconcile canonical Vehicle lifecycle to Blueprint values; add canonical
+Vehicle↔Equipment coupling; feed real Tray/Trailer statuses into the existing
+canonical Vehicle Compliance engine. AUDIT/build only — staging branch, no
+production, no `main` change, no real ACE data migration.
+
+### Locked owner decisions
+- Canonical vehicle lifecycle values: `Active`, `In Workshop`, `Retired`, `Sold`,
+  `Written Off`, `Pending Disposal`.
+- `Inactive` deprecated. `Archived` is not a lifecycle state — record archival is
+  controlled by `is_archived`.
+- V1: at most one active Tray, at most one active Trailer per vehicle. No
+  multi-position (B-Double / road-train) logic.
+- Expiry-domain internal `"Compliant"` renders as `"Current"` at UI layer.
+  Vehicle Compliance `"Compliant"` remains `"Compliant"` (Blueprint-mandated).
+
+### Backend
+- `backend/registers.py` — `VehicleStatus` enum replaced with the 6 canonical values.
+  Write validators added on `VehicleCreate` / `VehicleUpdate` to reject
+  `Inactive` / `Maintenance` / `Archived`. `VehicleBase.vehicle_status` typed
+  as `Optional[str]` to preserve tolerant reads on legacy stored values.
+  `DELETE /api/vehicles/{id}` no longer overwrites `vehicle_status` to
+  `Archived` — only sets `is_archived=True`.
+- `reconcile_vehicle_lifecycle(db)` idempotent startup helper:
+  * Maintenance → In Workshop (safe 1:1 remap on non-archived rows only).
+  * Inactive → **no auto-map**, logs `logger.critical` for owner triage.
+  * Archived lifecycle values left in place (record-management, not lifecycle).
+- `backend/relationships.py` — new canonical collection
+  `vehicle_equipment_couplings` with `CouplingRole ∈ {Tray, Trailer}`.
+  Service methods (`_Service`) enforce:
+  * vehicle & equipment must exist and not be archived
+  * role must match `equipment_type`
+  * at most one active <role> per vehicle
+  * an equipment record active on at most one vehicle
+  * DELETE = soft close (`is_active=False`, `is_archived=True`, `end_date` set)
+  * archive-equipment cascade also closes couplings.
+  Reconciliation aggregates report duplicate active couplings.
+- `backend/compliance_records.py` — `vehicle_summary` now resolves active
+  Tray/Trailer couplings, calls existing `equipment_summary`, translates through
+  `_to_vc_component`, and composes overall status. For Prime Movers overall =
+  WSW([prime_mover_status, tray_status, trailer_status]); for non-PM vehicles the
+  legacy vehicle-own WSW is preserved to avoid regressing Rigid compliance.
+- `/api/compliance/overview` now returns `fleet_vehicle_compliance` — canonical
+  WSW across all vehicles for each of the four statuses. Backend-only; no
+  frontend calculation.
+
+### API surface (new)
+- `GET    /api/vehicle-equipment-couplings`
+- `POST   /api/vehicle-equipment-couplings`
+- `POST   /api/vehicle-equipment-couplings/reassign`
+- `GET    /api/vehicle-equipment-couplings/{id}`
+- `PUT    /api/vehicle-equipment-couplings/{id}`
+- `DELETE /api/vehicle-equipment-couplings/{id}`
+
+### Frontend
+- `frontend/src/lib/registers.js` — vehicle `statusOptions` and `fields[vehicle_status].options`
+  updated to the six canonical values. `statusTone()` extended for the new values.
+  Field label renamed `Status → Lifecycle`.
+- `frontend/src/lib/compliance.js` — added `expiryDisplayLabel(status)` helper
+  (Compliant → Current for expiry-domain records only). `STATUS_STYLES` and
+  `STATUS_DOT` extended with `Current` mirror of `Compliant`.
+- `frontend/src/pages/CompliancePage.jsx` — `StatusBadge` wired to
+  `expiryDisplayLabel` so compliance record tables render `Current` for
+  Compliant expiry-domain records.
+- `frontend/src/pages/VehicleCompliancePage.jsx` — rollup tiles now read
+  canonical `fleet_vehicle_compliance` fields from `/api/compliance/overview`.
+  Per-vehicle table now has explicit Prime Mover / Tray / Trailer / Overall
+  columns each rendering canonical backend values. No frontend WSW.
+
+### Tests
+- `tests/test_ebr02c_lifecycle_and_couplings.py` — 30 acceptance tests over the
+  live backend covering Vehicle Lifecycle, Coupling Creation, Uniqueness,
+  Compliance Integration, Data Safety. **All 30 pass**.
+- Full targeted suite (203 tests across EB-R01, EB-R01C, EB-R02, EB-R02C,
+  Registers-EB02, Relationships-EB03): **203 passed**.
+- Pre-existing failures **not caused by EB-R02C** (verified via `git stash`):
+  legacy generic-module writes (EB-R01 410 wall), `/api/public-config`
+  unauthenticated route (EB-18), DR rehearsal cascade from the security gate.
+
+### Not changed
+- Driver↔Vehicle and Driver↔Equipment engines untouched.
+- Activation, Notifications, Numbering, Documents, Reporting untouched.
+- No real ACE data migration. No `main` change. No production deploy.
+- No multi-trailer positional logic. `carrier_configuration` remains
+  descriptive metadata only, not used for identity or coupling inference.

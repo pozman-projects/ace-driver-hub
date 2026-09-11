@@ -60,10 +60,42 @@ class OwnershipModel(str, Enum):
 
 
 class VehicleStatus(str, Enum):
+    """EB-R02C · Canonical Vehicle Lifecycle values.
+
+    Locked owner decisions:
+      - "Inactive" is DEPRECATED and MUST NOT be a selectable/accepted value.
+      - "Maintenance" is superseded by "In Workshop".
+      - "Archived" is NOT a lifecycle state. Archival is controlled by is_archived.
+    Legacy stored values are tolerated on READ only (see VehicleRead uses `str`).
+    """
+
     Active = "Active"
-    Inactive = "Inactive"
-    Maintenance = "Maintenance"
-    Archived = "Archived"
+    InWorkshop = "In Workshop"
+    Retired = "Retired"
+    Sold = "Sold"
+    WrittenOff = "Written Off"
+    PendingDisposal = "Pending Disposal"
+
+
+# EB-R02C · Values allowed for READ tolerance only. Blocked on WRITE.
+DEPRECATED_VEHICLE_STATUSES = {"Inactive", "Maintenance", "Archived"}
+ALLOWED_VEHICLE_STATUSES = {s.value for s in VehicleStatus}
+
+
+def _validate_vehicle_status_on_write(v):
+    """Accepts only the six approved lifecycle values. Rejects deprecated ones.
+    Called from write payloads (VehicleCreate / VehicleUpdate) only."""
+    if v is None or v == "":
+        return None
+    if v in DEPRECATED_VEHICLE_STATUSES:
+        raise ValueError(
+            f"vehicle_status '{v}' is deprecated. Use one of {sorted(ALLOWED_VEHICLE_STATUSES)}."
+        )
+    if v not in ALLOWED_VEHICLE_STATUSES:
+        raise ValueError(
+            f"vehicle_status must be one of {sorted(ALLOWED_VEHICLE_STATUSES)}"
+        )
+    return v
 
 
 class EquipmentType(str, Enum):
@@ -247,12 +279,17 @@ class VehicleBase(BaseModel):
     carrier_configuration: Optional[str] = None
     ownership_model: Optional[OwnershipModel] = None
     owner_id: Optional[str] = None
-    vehicle_status: VehicleStatus = VehicleStatus.Active
+    # EB-R02C · stored as plain str for legacy tolerance on READ. Writes go
+    # through VehicleCreate / VehicleUpdate which enforce the canonical enum.
+    vehicle_status: Optional[str] = VehicleStatus.Active.value
     company_ref: Optional[str] = None
 
 
 class VehicleCreate(VehicleBase):
-    pass
+    @field_validator("vehicle_status")
+    @classmethod
+    def _valid_vehicle_status(cls, v):
+        return _validate_vehicle_status_on_write(v)
 
 
 class VehicleUpdate(BaseModel):
@@ -267,9 +304,14 @@ class VehicleUpdate(BaseModel):
     carrier_configuration: Optional[str] = None
     ownership_model: Optional[OwnershipModel] = None
     owner_id: Optional[str] = None
-    vehicle_status: Optional[VehicleStatus] = None
+    vehicle_status: Optional[str] = None
     company_ref: Optional[str] = None
     is_archived: Optional[bool] = None
+
+    @field_validator("vehicle_status")
+    @classmethod
+    def _valid_vehicle_status(cls, v):
+        return _validate_vehicle_status_on_write(v)
 
 
 class VehicleRead(VehicleBase, AuditFields):
@@ -464,7 +506,7 @@ SEED_VEHICLES = [
         "vehicle_type": "Rigid",
         "carrier_configuration": "Single-carrier",
         "ownership_model": OwnershipModel.SubContracted.value,
-        "vehicle_status": VehicleStatus.Maintenance.value,
+        "vehicle_status": VehicleStatus.InWorkshop.value,
         "company_ref": "ACE Car Freighters",
         "_seed_owner_key": None,
     },
@@ -575,6 +617,50 @@ async def ensure_indexes(db):
     await db[OWNERS_COLL].create_index("id", unique=True)
     await db[VEHICLES_COLL].create_index("id", unique=True)
     await db[EQUIPMENT_COLL].create_index("id", unique=True)
+
+
+async def reconcile_vehicle_lifecycle(db):
+    """EB-R02C · Idempotent one-time lifecycle reconciliation.
+
+    Rules (from locked owner decisions):
+      * Existing "Active" rows: unchanged.
+      * Existing "Maintenance" rows on NON-archived vehicles: safely remap to
+        "In Workshop" (1:1 semantic — locked decision).
+      * Existing "Inactive" rows: NEVER auto-map. Log a critical warning and
+        return without mutation so the owner can triage.
+      * Existing "Archived" rows: NEVER auto-map. Archived is not a lifecycle
+        state. Left in place; is_archived remains the record-management flag.
+
+    Returns a dict with counts for observability.
+    """
+    report = {"remapped_maintenance": 0, "encountered_inactive": 0, "left_archived": 0}
+
+    # 1. Maintenance -> In Workshop (only non-archived rows)
+    r = await db[VEHICLES_COLL].update_many(
+        {"vehicle_status": "Maintenance", "is_archived": {"$ne": True}},
+        {"$set": {"vehicle_status": VehicleStatus.InWorkshop.value, "updated_at": _iso_now(), "updated_by": "system-ebr02c"}},
+    )
+    report["remapped_maintenance"] = r.modified_count
+
+    # 2. Inactive rows: DO NOT auto-map. Log for owner triage.
+    report["encountered_inactive"] = await db[VEHICLES_COLL].count_documents(
+        {"vehicle_status": "Inactive", "is_archived": {"$ne": True}}
+    )
+    if report["encountered_inactive"] > 0:
+        logger.critical(
+            "EB-R02C · %d vehicle(s) still have deprecated vehicle_status='Inactive'. "
+            "No auto-mapping performed. Owner triage required.",
+            report["encountered_inactive"],
+        )
+
+    # 3. Archived legacy lifecycle rows: left in place (audit-only count).
+    report["left_archived"] = await db[VEHICLES_COLL].count_documents(
+        {"vehicle_status": "Archived"}
+    )
+
+    if report["remapped_maintenance"]:
+        logger.info("EB-R02C reconciliation: %s", report)
+    return report
 
 
 # ---------- Router factory ----------------------------------------------------
@@ -796,12 +882,13 @@ def build_registers_router(db, get_current_user):
     @router.delete("/vehicles/{vehicle_id}")
     async def archive_vehicle(vehicle_id: str, current=Depends(get_current_user)):
         _require_delete_role(current)
+        # EB-R02C · Archival is controlled by is_archived. vehicle_status
+        # (lifecycle) is NOT touched — Archived is not a lifecycle state.
         result = await db[VEHICLES_COLL].update_one(
             {"id": vehicle_id},
             {
                 "$set": {
                     "is_archived": True,
-                    "vehicle_status": VehicleStatus.Archived.value,
                     "updated_at": _iso_now(),
                     "updated_by": current.get("email"),
                 }

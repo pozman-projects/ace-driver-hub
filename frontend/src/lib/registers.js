@@ -108,7 +108,8 @@ export const REGISTERS = {
     idField: "id",
     primaryField: "registration_number",
     statusField: "vehicle_status",
-    statusOptions: ["Active", "Inactive", "Maintenance", "Archived"],
+    // EB-R02C · Canonical Vehicle Lifecycle. Deprecated: Inactive/Maintenance/Archived.
+    statusOptions: ["Active", "In Workshop", "Retired", "Sold", "Written Off", "Pending Disposal"],
     searchFields: ["registration_number", "vin", "make", "model", "year", "vehicle_type", "carrier_configuration"],
     columns: [
       { key: "registration_number", label: "Rego", weight: "primary" },
@@ -137,9 +138,9 @@ export const REGISTERS = {
       { key: "owner_id", label: "Owner", type: "owner_select" },
       {
         key: "vehicle_status",
-        label: "Status",
+        label: "Lifecycle",
         type: "select",
-        options: ["Active", "Inactive", "Maintenance", "Archived"],
+        options: ["Active", "In Workshop", "Retired", "Sold", "Written Off", "Pending Disposal"],
       },
       { key: "company_ref", label: "Company" },
     ],
@@ -195,7 +196,8 @@ export function statusTone(status) {
   const s = String(status || "").toLowerCase();
   if (s === "archived") return "grey";
   if (s === "inactive") return "grey";
-  if (s === "maintenance") return "amber";
+  if (s === "maintenance" || s === "in workshop") return "amber";
+  if (s === "retired" || s === "sold" || s === "written off" || s === "pending disposal") return "grey";
   if (s === "on leave" || s === "training" || s === "probation") return "amber";
   if (s === "available" || s === "active" || s === "assigned") return "green";
   return "grey";

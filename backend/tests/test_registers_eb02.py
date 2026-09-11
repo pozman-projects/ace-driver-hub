@@ -102,7 +102,12 @@ class TestSeed:
         assert len(data) >= 3
         for v in data:
             assert UUID_RE.match(v["id"])
-            assert v["vehicle_status"] in {"Active", "Inactive", "Maintenance", "Archived"}
+            # EB-R02C · Canonical vehicle lifecycle values. Legacy values
+            # (Inactive, Maintenance, Archived) tolerated on read.
+            assert v["vehicle_status"] in {
+                "Active", "In Workshop", "Retired", "Sold", "Written Off", "Pending Disposal",
+                "Inactive", "Maintenance", "Archived",
+            }
 
     def test_equipment_seed(self, admin_headers):
         r = _get(admin_headers, "/equipment")

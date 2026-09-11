@@ -207,6 +207,8 @@ export const COMPLIANCE_SLUGS = Object.keys(COMPLIANCE_TYPES);
 // Status → tailwind classes for the canonical status badge
 export const STATUS_STYLES = {
   Compliant: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  // EB-R02C · User-facing expiry-domain label mirror of "Compliant".
+  Current: "bg-emerald-50 text-emerald-700 border-emerald-200",
   "Due Soon": "bg-amber-50 text-amber-700 border-amber-200",
   Expired: "bg-red-50 text-red-700 border-red-200",
   Missing: "bg-red-50 text-red-700 border-red-200",
@@ -218,6 +220,7 @@ export const STATUS_STYLES = {
 
 export const STATUS_DOT = {
   Compliant: "bg-emerald-500",
+  Current: "bg-emerald-500",
   "Due Soon": "bg-amber-500",
   Expired: "bg-red-500",
   Missing: "bg-red-500",
@@ -226,3 +229,16 @@ export const STATUS_DOT = {
   "Not Applicable": "bg-slate-300",
   Archived: "bg-slate-400",
 };
+
+/**
+ * EB-R02C · Expiry-domain display label translation.
+ *
+ * Internal canonical value "Compliant" is rendered to the user as "Current"
+ * in expiry-controlled domains ONLY (Licences, Registrations, Insurance,
+ * Inspections, Equipment Compliance records). Vehicle Compliance
+ * (Compliant / Conditions / Non-Compliant / Not Applicable) MUST NOT use
+ * this mapping — its "Compliant" label is Blueprint-mandated and stays.
+ */
+export function expiryDisplayLabel(status) {
+  return status === "Compliant" ? "Current" : status;
+}

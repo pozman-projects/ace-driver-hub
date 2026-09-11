@@ -26,6 +26,7 @@ from registers import (  # noqa: F401 — reuse canonical constants
     VEHICLES_COLL,
     EQUIPMENT_COLL,
     EquipmentStatus,
+    EquipmentType,
     VehicleStatus,
 )
 
@@ -34,6 +35,8 @@ logger = logging.getLogger("dcc.relationships")
 DOR_COLL = "driver_owner_relationships"
 DVA_COLL = "driver_vehicle_assignments"
 DEA_COLL = "driver_equipment_assignments"
+# EB-R02C · Vehicle↔Equipment coupling (Prime Mover ↔ Tray/Trailer)
+VEC_COLL = "vehicle_equipment_couplings"
 
 BLOCKED_EQUIPMENT_STATUSES = {
     EquipmentStatus.Maintenance.value,
@@ -149,6 +152,48 @@ class DriverEquipmentUpdate(BaseModel):
 
 class DriverEquipmentRead(DriverEquipmentBase, _Audit):
     pass
+
+
+# EB-R02C · Vehicle↔Equipment coupling models --------------------------------
+class CouplingRole(str, Enum):
+    Tray = "Tray"
+    Trailer = "Trailer"
+
+
+class VehicleEquipmentCouplingBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    vehicle_id: str
+    equipment_id: str
+    role: CouplingRole
+    is_active: bool = True
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class VehicleEquipmentCouplingCreate(VehicleEquipmentCouplingBase):
+    pass
+
+
+class VehicleEquipmentCouplingUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    is_active: Optional[bool] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    notes: Optional[str] = None
+    is_archived: Optional[bool] = None
+
+
+class VehicleEquipmentCouplingRead(VehicleEquipmentCouplingBase, _Audit):
+    pass
+
+
+class VehicleEquipmentReassignBody(BaseModel):
+    vehicle_id: str
+    equipment_id: str
+    role: CouplingRole
+    start_date: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class VehicleReassignBody(BaseModel):
@@ -450,11 +495,182 @@ class _Service:
                 }
             },
         )
+        # EB-R02C · Cascade close of any active vehicle↔equipment coupling
+        await self.db[VEC_COLL].update_many(
+            {"equipment_id": equipment_id, "is_active": True, "is_archived": {"$ne": True}},
+            {
+                "$set": {
+                    "is_active": False,
+                    "end_date": _today(),
+                    "updated_at": _iso(),
+                    "updated_by": actor,
+                }
+            },
+        )
+
+    # ----- Vehicle-Equipment coupling (EB-R02C) --------------------------------
+    async def close_active_coupling_for_vehicle_role(
+        self, vehicle_id: str, role: str, when: str, actor: Optional[str]
+    ) -> int:
+        r = await self.db[VEC_COLL].update_many(
+            {
+                "vehicle_id": vehicle_id,
+                "role": role,
+                "is_active": True,
+                "is_archived": {"$ne": True},
+            },
+            {
+                "$set": {
+                    "is_active": False,
+                    "end_date": when,
+                    "updated_at": _iso(),
+                    "updated_by": actor,
+                }
+            },
+        )
+        return r.modified_count
+
+    async def close_active_coupling_for_equipment(
+        self, equipment_id: str, when: str, actor: Optional[str]
+    ) -> int:
+        r = await self.db[VEC_COLL].update_many(
+            {
+                "equipment_id": equipment_id,
+                "is_active": True,
+                "is_archived": {"$ne": True},
+            },
+            {
+                "$set": {
+                    "is_active": False,
+                    "end_date": when,
+                    "updated_at": _iso(),
+                    "updated_by": actor,
+                }
+            },
+        )
+        return r.modified_count
+
+    async def create_vehicle_equipment_coupling(
+        self,
+        payload: VehicleEquipmentCouplingCreate,
+        actor: Optional[str],
+        allow_conflict_close: bool = False,
+    ) -> Dict[str, Any]:
+        # Existence
+        await _must_exist(self.db, VEHICLES_COLL, payload.vehicle_id, "Vehicle")
+        await _must_exist(self.db, EQUIPMENT_COLL, payload.equipment_id, "Equipment")
+
+        vehicle = await self.db[VEHICLES_COLL].find_one({"id": payload.vehicle_id}, {"_id": 0})
+        equipment = await self.db[EQUIPMENT_COLL].find_one({"id": payload.equipment_id}, {"_id": 0})
+
+        # Neither may be archived
+        if vehicle.get("is_archived"):
+            raise HTTPException(status_code=400, detail="Vehicle is archived and cannot be coupled")
+        if equipment.get("is_archived"):
+            raise HTTPException(status_code=400, detail="Equipment is archived and cannot be coupled")
+
+        # Role must match equipment_type
+        eq_type = equipment.get("equipment_type")
+        role_value = payload.role.value if hasattr(payload.role, "value") else payload.role
+        if role_value == CouplingRole.Tray.value and eq_type != EquipmentType.Tray.value:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Role 'Tray' requires equipment_type 'Tray' (got '{eq_type}')",
+            )
+        if role_value == CouplingRole.Trailer.value and eq_type != EquipmentType.Trailer.value:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Role 'Trailer' requires equipment_type 'Trailer' (got '{eq_type}')",
+            )
+
+        # Equipment must not be in a blocked status (Maintenance / Inactive / Archived)
+        if equipment.get("equipment_status") in BLOCKED_EQUIPMENT_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Equipment status '{equipment.get('equipment_status')}' cannot be newly coupled",
+            )
+
+        if payload.is_active:
+            # Uniqueness — at most one active <role> per vehicle
+            existing_role = await self.db[VEC_COLL].find_one(
+                {
+                    "vehicle_id": payload.vehicle_id,
+                    "role": role_value,
+                    "is_active": True,
+                    "is_archived": {"$ne": True},
+                },
+                {"_id": 0, "id": 1},
+            )
+            if existing_role and not allow_conflict_close:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Vehicle already has an active {role_value} coupling ({existing_role['id']}). "
+                        "Use POST /api/vehicle-equipment-couplings/reassign to close and reassign."
+                    ),
+                )
+            # Uniqueness — equipment can be active on at most one vehicle
+            existing_eq = await self.db[VEC_COLL].find_one(
+                {
+                    "equipment_id": payload.equipment_id,
+                    "is_active": True,
+                    "is_archived": {"$ne": True},
+                },
+                {"_id": 0, "id": 1, "vehicle_id": 1},
+            )
+            if existing_eq and not allow_conflict_close:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Equipment already actively coupled to another vehicle "
+                        f"({existing_eq['vehicle_id']}, coupling {existing_eq['id']}). "
+                        "Use POST /api/vehicle-equipment-couplings/reassign to close and reassign."
+                    ),
+                )
+            when = payload.start_date or _today()
+            if existing_role and allow_conflict_close:
+                await self.close_active_coupling_for_vehicle_role(
+                    payload.vehicle_id, role_value, when, actor
+                )
+            if existing_eq and allow_conflict_close:
+                await self.close_active_coupling_for_equipment(
+                    payload.equipment_id, when, actor
+                )
+
+        now = _iso()
+        doc = payload.model_dump(mode="json")
+        doc["role"] = role_value  # normalise enum -> str
+        doc.update(
+            {
+                "id": str(uuid.uuid4()),
+                "is_archived": False,
+                "created_at": now,
+                "updated_at": now,
+                "created_by": actor,
+                "updated_by": actor,
+            }
+        )
+        await self.db[VEC_COLL].insert_one(doc)
+        doc.pop("_id", None)
+        return doc
+
+    async def reassign_vehicle_equipment(
+        self, body: VehicleEquipmentReassignBody, actor: Optional[str]
+    ) -> Dict[str, Any]:
+        payload = VehicleEquipmentCouplingCreate(
+            vehicle_id=body.vehicle_id,
+            equipment_id=body.equipment_id,
+            role=body.role,
+            is_active=True,
+            start_date=body.start_date,
+            notes=body.notes,
+        )
+        return await self.create_vehicle_equipment_coupling(payload, actor, allow_conflict_close=True)
 
 
 # ---------------------------------------------------------------- indexes
 async def ensure_indexes(db):
-    for c in (DOR_COLL, DVA_COLL, DEA_COLL):
+    for c in (DOR_COLL, DVA_COLL, DEA_COLL, VEC_COLL):
         await db[c].create_index("id", unique=True)
     await db[DOR_COLL].create_index("driver_id")
     await db[DOR_COLL].create_index("owner_id")
@@ -462,6 +678,9 @@ async def ensure_indexes(db):
     await db[DVA_COLL].create_index("vehicle_id")
     await db[DEA_COLL].create_index("driver_id")
     await db[DEA_COLL].create_index("equipment_id")
+    await db[VEC_COLL].create_index("vehicle_id")
+    await db[VEC_COLL].create_index("equipment_id")
+    await db[VEC_COLL].create_index([("vehicle_id", 1), ("role", 1), ("is_active", 1)])
 
 
 # ---------------------------------------------------------------- reconciliation
@@ -505,6 +724,24 @@ async def startup_reconciliation(db):
         if eq.get("equipment_status") in BLOCKED_EQUIPMENT_STATUSES:
             continue
         await svc.sync_equipment_status_after_change(eq["id"], "system-reconciliation")
+
+    # 5. EB-R02C · Duplicate active <role> per vehicle
+    pipeline_vec_v = [
+        {"$match": {"is_active": True, "is_archived": {"$ne": True}}},
+        {"$group": {"_id": {"vehicle_id": "$vehicle_id", "role": "$role"}, "n": {"$sum": 1}, "ids": {"$push": "$id"}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    async for row in db[VEC_COLL].aggregate(pipeline_vec_v):
+        report["warnings"].append({"issue": "multiple_active_role_per_vehicle", **row})
+
+    # 6. EB-R02C · Duplicate active coupling per equipment
+    pipeline_vec_e = [
+        {"$match": {"is_active": True, "is_archived": {"$ne": True}}},
+        {"$group": {"_id": "$equipment_id", "n": {"$sum": 1}, "ids": {"$push": "$id"}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    async for row in db[VEC_COLL].aggregate(pipeline_vec_e):
+        report["warnings"].append({"issue": "multiple_active_couplings_per_equipment", **row})
 
     if report["warnings"]:
         logger.warning("EB-03 reconciliation warnings: %s", report["warnings"])
@@ -915,5 +1152,109 @@ def build_relationships_router(db, get_current_user):
         )
         await svc.sync_equipment_status_after_change(existing["equipment_id"], current.get("email"))
         return {"status": "archived", "id": aid}
+
+    # ----------------- VEHICLE-EQUIPMENT COUPLINGS (EB-R02C) -----------------
+    @router.get("/vehicle-equipment-couplings")
+    async def list_vec(
+        vehicle_id: Optional[str] = None,
+        equipment_id: Optional[str] = None,
+        role: Optional[CouplingRole] = None,
+        is_active: Optional[bool] = None,
+        include_archived: bool = False,
+        current=Depends(get_current_user),
+    ):
+        q: Dict[str, Any] = {}
+        if vehicle_id:
+            q["vehicle_id"] = vehicle_id
+        if equipment_id:
+            q["equipment_id"] = equipment_id
+        if role is not None:
+            q["role"] = role.value if hasattr(role, "value") else role
+        if is_active is not None:
+            q["is_active"] = is_active
+        if not include_archived:
+            q["is_archived"] = {"$ne": True}
+        return await db[VEC_COLL].find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+    @router.get("/vehicle-equipment-couplings/{cid}", response_model=VehicleEquipmentCouplingRead)
+    async def get_vec(cid: str, current=Depends(get_current_user)):
+        doc = await db[VEC_COLL].find_one({"id": cid}, {"_id": 0})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Not found")
+        return doc
+
+    @router.post("/vehicle-equipment-couplings", response_model=VehicleEquipmentCouplingRead)
+    async def create_vec(payload: VehicleEquipmentCouplingCreate, current=Depends(get_current_user)):
+        _require_write(current)
+        return await svc.create_vehicle_equipment_coupling(payload, current.get("email"), allow_conflict_close=False)
+
+    @router.post("/vehicle-equipment-couplings/reassign", response_model=VehicleEquipmentCouplingRead)
+    async def reassign_vec(body: VehicleEquipmentReassignBody, current=Depends(get_current_user)):
+        _require_write(current)
+        return await svc.reassign_vehicle_equipment(body, current.get("email"))
+
+    @router.put("/vehicle-equipment-couplings/{cid}", response_model=VehicleEquipmentCouplingRead)
+    async def update_vec(cid: str, payload: VehicleEquipmentCouplingUpdate, current=Depends(get_current_user)):
+        _require_write(current)
+        existing = await db[VEC_COLL].find_one({"id": cid}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Not found")
+        updates = payload.model_dump(mode="json", exclude_unset=True)
+        # If reactivating, uniqueness must hold
+        if updates.get("is_active") is True:
+            other_role = await db[VEC_COLL].find_one(
+                {
+                    "vehicle_id": existing["vehicle_id"],
+                    "role": existing["role"],
+                    "id": {"$ne": cid},
+                    "is_active": True,
+                    "is_archived": {"$ne": True},
+                },
+                {"_id": 0, "id": 1},
+            )
+            if other_role:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Vehicle already has another active {existing['role']} coupling",
+                )
+            other_eq = await db[VEC_COLL].find_one(
+                {
+                    "equipment_id": existing["equipment_id"],
+                    "id": {"$ne": cid},
+                    "is_active": True,
+                    "is_archived": {"$ne": True},
+                },
+                {"_id": 0, "id": 1},
+            )
+            if other_eq:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Equipment already actively coupled elsewhere",
+                )
+        updates["updated_at"] = _iso()
+        updates["updated_by"] = current.get("email")
+        await db[VEC_COLL].update_one({"id": cid}, {"$set": updates})
+        return await db[VEC_COLL].find_one({"id": cid}, {"_id": 0})
+
+    @router.delete("/vehicle-equipment-couplings/{cid}")
+    async def archive_vec(cid: str, current=Depends(get_current_user)):
+        _require_archive(current)
+        existing = await db[VEC_COLL].find_one({"id": cid}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Not found")
+        # Canonical relationship history semantics: soft-close, preserve history.
+        await db[VEC_COLL].update_one(
+            {"id": cid},
+            {
+                "$set": {
+                    "is_archived": True,
+                    "is_active": False,
+                    "end_date": _today(),
+                    "updated_at": _iso(),
+                    "updated_by": current.get("email"),
+                }
+            },
+        )
+        return {"status": "archived", "id": cid}
 
     return router

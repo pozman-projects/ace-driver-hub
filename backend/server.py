@@ -524,9 +524,11 @@ async def on_startup():
     await seed_sample_data()
     await backfill_driver_ids()
     # --- EB-02 Foundation Registers ---
-    from registers import ensure_indexes, migrate_existing_drivers, seed_registers
+    from registers import ensure_indexes, migrate_existing_drivers, seed_registers, reconcile_vehicle_lifecycle
     await ensure_indexes(db)
     await migrate_existing_drivers(db)
+    # EB-R02C · Reconcile Vehicle lifecycle to canonical enum (idempotent).
+    await reconcile_vehicle_lifecycle(db)
     await seed_registers(db)
     # --- EB-03 Relationships & Assignments ---
     from relationships import (

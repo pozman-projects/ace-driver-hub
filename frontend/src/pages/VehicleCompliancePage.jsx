@@ -6,10 +6,9 @@
  * records, business logic or a new data store. Drills through to the
  * existing canonical compliance record pages.
  *
- * Prime Mover / Tray / Trailer roll-ups derive from canonical
- * `vehicle_type` on vehicles_register. Where a component is not yet
- * exposed as a canonical output, the tile shows "Not yet available"
- * per Blueprint — no temporary inference logic.
+ * EB-R02C · Prime Mover / Tray / Trailer / Overall roll-ups render the
+ * canonical `fleet_vehicle_compliance` fields returned by the backend.
+ * No frontend WSW / status derivation is performed.
  */
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -19,6 +18,9 @@ import api from "../lib/api";
 
 const STATUS_STYLE = {
   Compliant: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Conditions: "bg-amber-50 text-amber-700 border-amber-200",
+  "Non-Compliant": "bg-red-50 text-red-700 border-red-200",
+  "Not Applicable": "bg-slate-50 text-slate-500 border-slate-200",
   Warning: "bg-amber-50 text-amber-700 border-amber-200",
   Expired: "bg-red-50 text-red-700 border-red-200",
   Missing: "bg-slate-100 text-slate-700 border-slate-300",
@@ -42,6 +44,7 @@ export default function VehicleCompliancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [totals, setTotals] = useState({});
+  const [fleet, setFleet] = useState({});
 
   useEffect(() => {
     let active = true;
@@ -51,6 +54,7 @@ export default function VehicleCompliancePage() {
         if (!active) return;
         setRows(r.data?.vehicles || []);
         setTotals(r.data?.totals?.vehicles || {});
+        setFleet(r.data?.fleet_vehicle_compliance || {});
       } catch (e) {
         if (active) setError(e?.response?.data?.detail || "Unable to load vehicle compliance");
       } finally {
@@ -61,13 +65,6 @@ export default function VehicleCompliancePage() {
       active = false;
     };
   }, []);
-
-  // Canonical /api/compliance/overview currently returns per-vehicle
-  // overall_status (used in the table below) and totals only. It does
-  // NOT return a canonical Prime Mover aggregate nor a fleet Overall
-  // aggregate. Per EB-R01C-FIX, no local status calculation is
-  // performed here — those tiles show "Not yet available" until the
-  // canonical service exposes them.
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -89,7 +86,7 @@ export default function VehicleCompliancePage() {
           </p>
         </div>
 
-        {/* Component roll-up strip */}
+        {/* Component roll-up strip — reads canonical fleet_vehicle_compliance */}
         <section
           data-testid="vehicle-compliance-rollup"
           className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"
@@ -101,14 +98,9 @@ export default function VehicleCompliancePage() {
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1.5">
               Prime Mover
             </div>
-            <span
-              data-testid="prime-mover-status"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.15em] border bg-slate-100 text-slate-500 border-slate-200"
-            >
-              Not yet available
-            </span>
+            <StatusBadge status={fleet.prime_mover_status} testid="prime-mover-status" />
             <div className="text-[11px] text-slate-500 mt-2">
-              Prime Mover is not an explicit canonical aggregate output yet.
+              Worst-status roll-up across all vehicles' Prime Mover component.
             </div>
           </div>
           <div
@@ -118,14 +110,9 @@ export default function VehicleCompliancePage() {
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1.5">
               Tray
             </div>
-            <span
-              data-testid="tray-status"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.15em] border bg-slate-100 text-slate-500 border-slate-200"
-            >
-              Not yet available
-            </span>
+            <StatusBadge status={fleet.tray_status} testid="tray-status" />
             <div className="text-[11px] text-slate-500 mt-2">
-              Tray is not an explicit canonical component output yet.
+              Worst-status roll-up across all coupled Trays.
             </div>
           </div>
           <div
@@ -135,14 +122,9 @@ export default function VehicleCompliancePage() {
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1.5">
               Trailer
             </div>
-            <span
-              data-testid="trailer-status"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.15em] border bg-slate-100 text-slate-500 border-slate-200"
-            >
-              Not yet available
-            </span>
+            <StatusBadge status={fleet.trailer_status} testid="trailer-status" />
             <div className="text-[11px] text-slate-500 mt-2">
-              Trailer is not an explicit canonical component output yet.
+              Worst-status roll-up across all coupled Trailers.
             </div>
           </div>
           <div
@@ -152,14 +134,9 @@ export default function VehicleCompliancePage() {
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1.5">
               Overall Vehicle Compliance
             </div>
-            <span
-              data-testid="overall-status"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.15em] border bg-slate-100 text-slate-500 border-slate-200"
-            >
-              Not yet available
-            </span>
+            <StatusBadge status={fleet.overall_vehicle_compliance_status} testid="overall-status" />
             <div className="text-[11px] text-slate-500 mt-2">
-              A canonical fleet-level aggregate is not yet exposed. Per-vehicle canonical overall_status is shown in the table below.
+              Canonical fleet Worst-Status-Wins across Prime Mover, Tray and Trailer.
             </div>
           </div>
         </section>
@@ -230,33 +207,32 @@ export default function VehicleCompliancePage() {
                   <tr>
                     <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Vehicle</th>
                     <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Type</th>
+                    <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Prime Mover</th>
+                    <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Tray</th>
+                    <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Trailer</th>
                     <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Overall</th>
-                    <th className="text-left px-4 py-2 font-medium uppercase tracking-[0.15em] text-[10px]">Components</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.map((v) => (
-                    <tr key={v.id} data-testid={`vehicle-row-${v.id}`}>
+                    <tr key={v.vehicle_id || v.id} data-testid={`vehicle-row-${v.vehicle_id || v.id}`}>
                       <td className="px-4 py-2 text-slate-900 font-medium">
-                        {v.registration_number || v.vin || v.id}
+                        {v.registration_number || v.vin || v.vehicle_id || v.id}
                       </td>
                       <td className="px-4 py-2 text-slate-600">
                         {v.vehicle_type || "—"}
                       </td>
                       <td className="px-4 py-2">
-                        <StatusBadge status={v.overall_status} testid={`row-overall-${v.id}`} />
+                        <StatusBadge status={v.prime_mover_status} testid={`row-pm-${v.vehicle_id || v.id}`} />
                       </td>
                       <td className="px-4 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {(v.components || []).map((c) => (
-                            <span
-                              key={c.component}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border border-slate-200 bg-white text-slate-600"
-                            >
-                              {c.label || c.component}: <StatusBadge status={c.status} />
-                            </span>
-                          ))}
-                        </div>
+                        <StatusBadge status={v.tray_status} testid={`row-tray-${v.vehicle_id || v.id}`} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <StatusBadge status={v.trailer_status} testid={`row-trailer-${v.vehicle_id || v.id}`} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <StatusBadge status={v.overall_vehicle_compliance_status} testid={`row-overall-${v.vehicle_id || v.id}`} />
                       </td>
                     </tr>
                   ))}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Navigate, Link } from "react-router-dom";
 import AppHeader from "../components/app/AppHeader";
 import DriverSelect from "../components/app/DriverSelect";
-import { COMPLIANCE_TYPES, STATUS_STYLES, STATUS_DOT } from "../lib/compliance";
+import { COMPLIANCE_TYPES, STATUS_STYLES, STATUS_DOT, expiryDisplayLabel } from "../lib/compliance";
 import api, { formatApiErrorDetail } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { Plus, MagnifyingGlass, X, Archive, PencilSimple, Warning, Paperclip } from "@phosphor-icons/react";
@@ -379,12 +379,14 @@ function CompCell({ col, row, lookups, entity }) {
 }
 
 export function StatusBadge({ status }) {
-  const cls = STATUS_STYLES[status] || STATUS_STYLES.Incomplete;
-  const dot = STATUS_DOT[status] || STATUS_DOT.Incomplete;
+  // EB-R02C · Expiry-domain compliance records: display "Compliant" as "Current".
+  const display = expiryDisplayLabel(status);
+  const cls = STATUS_STYLES[display] || STATUS_STYLES[status] || STATUS_STYLES.Incomplete;
+  const dot = STATUS_DOT[display] || STATUS_DOT[status] || STATUS_DOT.Incomplete;
   return (
     <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.15em] px-2.5 py-0.5 rounded-full border ${cls}`} data-testid={`status-badge-${status}`}>
       <span className={`inline-flex h-1.5 w-1.5 rounded-full ${dot}`} />
-      {status || "Unknown"}
+      {display || "Unknown"}
     </span>
   );
 }

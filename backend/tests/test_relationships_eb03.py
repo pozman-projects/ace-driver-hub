@@ -149,9 +149,9 @@ class TestDriverVehicle:
         assert len(allv) >= 2
 
     def test_display_on_dispatch_requires_active_vehicle(self, admin_headers, master):
-        # Set a vehicle to Maintenance, then try to assign with display_on_dispatch=true
+        # EB-R02C · "Maintenance" is deprecated; use canonical "In Workshop" lifecycle.
         vid = master["vehicles"][2]["id"]
-        _put(admin_headers, f"/vehicles/{vid}", {"vehicle_status": "Maintenance"})
+        _put(admin_headers, f"/vehicles/{vid}", {"vehicle_status": "In Workshop"})
         r = _post(admin_headers, "/driver-vehicle-assignments", {
             "driver_id": master["drivers"][2]["id"], "vehicle_id": vid, "display_on_dispatch": True
         })

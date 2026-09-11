@@ -37,17 +37,6 @@ function StatusBadge({ status, testid }) {
   );
 }
 
-function worstOf(statuses) {
-  const order = ["Missing", "Expired", "Warning", "Compliant"];
-  const rank = { Missing: 4, Expired: 3, Warning: 2, Compliant: 1 };
-  let best = null;
-  for (const s of statuses) {
-    if (!s) continue;
-    if (!best || (rank[s] || 0) > (rank[best] || 0)) best = s;
-  }
-  return best;
-}
-
 export default function VehicleCompliancePage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,14 +62,12 @@ export default function VehicleCompliancePage() {
     };
   }, []);
 
-  const byType = { "Prime Mover": [], Rigid: [], Other: [] };
-  for (const v of rows) {
-    const t = v.vehicle_type || "Other";
-    if (t === "Prime Mover" || t === "Rigid") byType[t].push(v);
-    else byType.Other.push(v);
-  }
-  const primeMoverStatus = worstOf(byType["Prime Mover"].map((v) => v.overall_status));
-  const overallStatus = worstOf(rows.map((v) => v.overall_status));
+  // Canonical /api/compliance/overview currently returns per-vehicle
+  // overall_status (used in the table below) and totals only. It does
+  // NOT return a canonical Prime Mover aggregate nor a fleet Overall
+  // aggregate. Per EB-R01C-FIX, no local status calculation is
+  // performed here — those tiles show "Not yet available" until the
+  // canonical service exposes them.
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -114,9 +101,14 @@ export default function VehicleCompliancePage() {
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1.5">
               Prime Mover
             </div>
-            <StatusBadge status={primeMoverStatus} testid="prime-mover-status" />
+            <span
+              data-testid="prime-mover-status"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.15em] border bg-slate-100 text-slate-500 border-slate-200"
+            >
+              Not yet available
+            </span>
             <div className="text-[11px] text-slate-500 mt-2">
-              {byType["Prime Mover"].length} vehicle(s) classified as Prime Mover in canonical Vehicle Register.
+              Prime Mover is not an explicit canonical aggregate output yet.
             </div>
           </div>
           <div
@@ -160,9 +152,14 @@ export default function VehicleCompliancePage() {
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-400 mb-1.5">
               Overall Vehicle Compliance
             </div>
-            <StatusBadge status={overallStatus} testid="overall-status" />
+            <span
+              data-testid="overall-status"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.15em] border bg-slate-100 text-slate-500 border-slate-200"
+            >
+              Not yet available
+            </span>
             <div className="text-[11px] text-slate-500 mt-2">
-              Worst-status roll-up across {rows.length} canonical vehicle(s).
+              A canonical fleet-level aggregate is not yet exposed. Per-vehicle canonical overall_status is shown in the table below.
             </div>
           </div>
         </section>

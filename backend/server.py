@@ -188,9 +188,44 @@ async def list_module_items(resource: str, current=Depends(get_current_user)):
     return items
 
 
+# EB-R01C · Legacy operational domains retired from the primary DCC.
+# The generic /api/modules/{resource} write path must no longer act as
+# an authoritative operational path. GET remains for migration and
+# reconciliation. POST/PUT/DELETE are blocked with HTTP 410 Gone and
+# a canonical-service pointer.
+_RETIRED_LEGACY_RESOURCES = {
+    "drivers": "canonical Driver service · /api/drivers · UI /registers/drivers",
+    "licences": "canonical Driver Licence compliance · /api/driver-licences · UI /compliance/records/driver-licences",
+    "truck-rego": "canonical Vehicle Registration compliance · /api/vehicle-registrations · UI /compliance/records/vehicle-registrations",
+    "insurance": "canonical Vehicle Insurance compliance · /api/vehicle-insurance · UI /compliance/records/vehicle-insurance",
+    "equipment": "canonical Equipment register · /api/equipment · UI /registers/equipment",
+    "maintenance": "canonical Vehicle Maintenance compliance · /api/vehicle-maintenance-tasks · UI /operations/vehicle-compliance",
+    "tilt-trays": "retired · use canonical Equipment register + Driver–Equipment relationship + Vehicle register + Vehicle compliance",
+    "onboarding": "canonical Driver Activation · /api/drivers/{driver_id}/activation · UI /operations/driver-readiness",
+}
+
+
+def _reject_legacy_write(resource: str) -> None:
+    """EB-R01C legacy write isolation. Raise HTTP 410 for retired
+    operational domains so the legacy generic CRUD cannot silently
+    create/update/delete authoritative operational truth. Legacy GET
+    remains available for reconciliation and history."""
+    if resource in _RETIRED_LEGACY_RESOURCES:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "legacy_module_retired",
+                "message": f"Legacy generic module '/api/modules/{resource}' is retired for operational writes.",
+                "canonical_service": _RETIRED_LEGACY_RESOURCES[resource],
+                "read_only": "GET remains available for migration and reconciliation.",
+            },
+        )
+
+
 @api_router.post("/modules/{resource}")
 async def create_module_item(resource: str, payload: dict, current=Depends(get_current_user)):
     coll_name = _validate_resource(resource)
+    _reject_legacy_write(resource)
     if current["role"] == "ReadOnly":
         raise HTTPException(status_code=403, detail="ReadOnly role cannot create")
     doc = dict(payload or {})
@@ -206,6 +241,7 @@ async def create_module_item(resource: str, payload: dict, current=Depends(get_c
 @api_router.put("/modules/{resource}/{item_id}")
 async def update_module_item(resource: str, item_id: str, payload: dict, current=Depends(get_current_user)):
     coll_name = _validate_resource(resource)
+    _reject_legacy_write(resource)
     if current["role"] == "ReadOnly":
         raise HTTPException(status_code=403, detail="ReadOnly role cannot update")
     update = {k: v for k, v in (payload or {}).items() if k not in ("id", "_id", "created_at", "created_by")}
@@ -221,6 +257,7 @@ async def update_module_item(resource: str, item_id: str, payload: dict, current
 @api_router.delete("/modules/{resource}/{item_id}")
 async def delete_module_item(resource: str, item_id: str, current=Depends(get_current_user)):
     coll_name = _validate_resource(resource)
+    _reject_legacy_write(resource)
     if current["role"] not in ("Admin", "Manager"):
         raise HTTPException(status_code=403, detail="Insufficient permissions to delete")
     result = await db[coll_name].delete_one({"id": item_id})

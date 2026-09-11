@@ -17,7 +17,6 @@ import {
   ArrowsDownUp,
 } from "@phosphor-icons/react";
 import AppHeader from "../components/app/AppHeader";
-import { MODULES } from "../lib/modules";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { SEVERITY_DOT } from "../lib/notifications";
@@ -32,6 +31,69 @@ const ICONS = {
   Trailer: TruckTrailer,
   UserPlus,
 };
+
+// EB-R01C · Approved 7 primary dashboard cards. Each card links to its
+// canonical destination and no longer traverses the legacy /m/{slug}
+// generic module CRUD path.
+const PRIMARY_CARDS = [
+  {
+    slug: "drivers",
+    title: "Driver Hub",
+    icon: "Users",
+    to: "/registers/drivers",
+    countKey: "drivers",
+    description: "Canonical Driver register — select a driver to open the Command Centre.",
+  },
+  {
+    slug: "driver-licences",
+    title: "Driver Licences",
+    icon: "IdentificationCard",
+    to: "/compliance/records/driver-licences",
+    countKey: "licences",
+    description: "Canonical Driver Licence compliance records.",
+  },
+  {
+    slug: "vehicle-registrations",
+    title: "Vehicle Registrations",
+    icon: "Truck",
+    to: "/compliance/records/vehicle-registrations",
+    countKey: "truck-rego",
+    description: "Canonical Vehicle Registration compliance records.",
+  },
+  {
+    slug: "vehicle-insurance",
+    title: "Vehicle Insurance",
+    icon: "ShieldCheck",
+    to: "/compliance/records/vehicle-insurance",
+    countKey: "insurance",
+    description: "Canonical Vehicle Insurance compliance records.",
+  },
+  {
+    slug: "equipment",
+    title: "ACE Equipment",
+    icon: "Wrench",
+    to: "/registers/equipment",
+    countKey: "equipment",
+    description: "Canonical Equipment register — master data and assignment via canonical relationships.",
+  },
+  {
+    slug: "vehicle-compliance",
+    title: "Vehicle Compliance",
+    icon: "Toolbox",
+    to: "/operations/vehicle-compliance",
+    countKey: null,
+    description: "Fleet-level Vehicle Compliance overview — Prime Mover, Tray, Trailer, Overall.",
+  },
+  {
+    slug: "driver-activation",
+    title: "Driver Activation",
+    icon: "UserPlus",
+    to: "/operations/driver-readiness",
+    countKey: null,
+    description: "Driver Activation Checklist and readiness gate — drill to each driver's activation.",
+  },
+];
+
 
 export default function Hub() {
   const { user } = useAuth();
@@ -104,7 +166,7 @@ export default function Hub() {
             {dateLabel}
           </div>
           <div className="uppercase tracking-[0.2em]">
-            Modules · <span className="text-gray-900 font-medium">{MODULES.length}</span>
+            Modules · <span className="text-gray-900 font-medium">{PRIMARY_CARDS.length}</span>
           </div>
         </section>
 
@@ -114,7 +176,7 @@ export default function Hub() {
         {/* Compliance widget */}
         <ComplianceWidget data={compliance} loaded={loaded} />
 
-        {/* Command centre body: primary 8 modules + right rail */}
+        {/* Command centre body: primary 7 modules + right rail */}
         <div
           className="grid grid-cols-12 gap-3"
           data-testid="dashboard-body"
@@ -139,13 +201,13 @@ export default function Hub() {
               className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-4 gap-3"
               data-testid="module-grid"
             >
-              {MODULES.map((mod, i) => {
+              {PRIMARY_CARDS.map((mod, i) => {
                 const Icon = ICONS[mod.icon] || Users;
-                const count = stats[mod.slug];
+                const count = mod.countKey ? stats[mod.countKey] : undefined;
                 return (
                   <Link
                     key={mod.slug}
-                    to={`/m/${mod.slug}`}
+                    to={mod.to}
                     data-testid={`module-card-${mod.slug}`}
                     className="ace-fade-up bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 hover:border-cyan-300 transition-all duration-300 group cursor-pointer flex flex-col items-start text-left"
                     style={{ animationDelay: `${i * 40}ms` }}

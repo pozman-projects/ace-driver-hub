@@ -39,6 +39,7 @@ import AutomationTemplatesPage from "./pages/AutomationTemplatesPage";
 import AutomationIncidentsPage from "./pages/AutomationIncidentsPage";
 import OperationsDashboard from "./pages/OperationsDashboard";
 import DriverReadinessPage from "./pages/DriverReadinessPage";
+import VehicleCompliancePage from "./pages/VehicleCompliancePage";
 import ComplianceWorkloadPage from "./pages/ComplianceWorkloadPage";
 import MigrationReadinessPage from "./pages/MigrationReadinessPage";
 import IntegrityAdminPage from "./pages/IntegrityAdminPage";
@@ -238,6 +239,7 @@ function App() {
             <Route path="/administration/go-live" element={<ProtectedRoute><GoLivePage /></ProtectedRoute>} />
             <Route path="/operations" element={<ProtectedRoute><OperationsDashboard /></ProtectedRoute>} />
             <Route path="/operations/driver-readiness" element={<ProtectedRoute><DriverReadinessPage /></ProtectedRoute>} />
+            <Route path="/operations/vehicle-compliance" element={<ProtectedRoute><VehicleCompliancePage /></ProtectedRoute>} />
             <Route path="/operations/compliance-workload" element={<ProtectedRoute><ComplianceWorkloadPage /></ProtectedRoute>} />
             <Route path="/operations/migration-readiness" element={<ProtectedRoute><MigrationReadinessPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />

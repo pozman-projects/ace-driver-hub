@@ -1955,3 +1955,68 @@ Two surgical fixes on top of EB-R03B-II. Scope strictly limited.
 - No storage/architecture/permissions/compliance/activation/passes
   /truck-photos changes. No schema change. No data migration.
 - Card layout preserved. No new endpoints.
+
+---
+
+## MR-07A — Backend Permissions & Data Protection (2026-02-26)
+
+**Scope**: Enforce Driver-account field protection at the SOURCE / API boundary
+(canonical Driver endpoints), unifying with the existing DCC aggregator rule.
+Confirm ReadOnly cannot mutate canonical operational records. Preserve legacy
+write wall (EB-R01) and existing document sensitivity gates.
+
+### Locked rules (V1)
+- Sensitive Driver fields: `{business_name, abn, payroll_number, payment_percentage}`
+- Read allowed:  `Admin`, `Manager`
+- Write allowed: `Admin`, `Manager`
+- Roles: `Admin`, `Manager`, `Compliance`, `Allocator`, `ReadOnly` (unchanged;
+  authoritative source is the existing `role` string on the user record and
+  the ROLE_CAN_* / ROLE_ACTIVATE sets in `registers.py` and `activation_module.py`).
+
+### Backend
+- `backend/permissions.py` — **new**. Smallest possible shared helper module.
+  Exports: `SENSITIVE_ACCOUNT_FIELDS`, `ACCOUNT_READ_ROLES`, `ACCOUNT_WRITE_ROLES`,
+  `can_read_driver_account`, `can_write_driver_account`,
+  `strip_driver_account_fields`, `strip_driver_account_fields_many`,
+  `enforce_driver_account_write`. No policy engine, no DB-driven RBAC.
+- `backend/registers.py`:
+  * `GET /api/drivers` — response now stripped via `strip_driver_account_fields_many(current)`.
+  * `GET /api/drivers/{id}` — response stripped via `strip_driver_account_fields(current)`.
+  * `POST /api/drivers` — `enforce_driver_account_write` raises 403 when a
+    non-account role supplies any restricted field; response stripped.
+  * `PUT /api/drivers/{id}` — same 403 guard; response stripped.
+- `backend/driver_profile_module.py` — imports the sensitive-field set + the
+  strip helper from `permissions.py` (single source of truth). Behavior
+  unchanged; duplication removed.
+
+### Preserved
+- `_require_write_role` in `registers.py` — ReadOnly gets 403 on
+  POST/PUT/DELETE for Drivers / Vehicles / Equipment.
+- `_require_write` in `compliance_records.py` — ReadOnly gets 403 on
+  Driver Licence / Vehicle Registration / Vehicle Insurance mutations.
+- `_reject_legacy_write` in `server.py` — retired legacy resources still
+  return HTTP 410 (verified for `licences`, `insurance`, `tilt-trays`).
+- Document sensitivity gates in `documents_module.py` — Restricted preview
+  still 403 for Allocator; `storage_key` never returned on any response.
+
+### Tests
+- `backend/tests/test_mr07a_permissions.py` — **new**, 27 acceptance tests
+  spanning canonical Driver read/write for all five roles, DCC aggregator
+  strip, ReadOnly write-block for Driver/Vehicle/Equipment/Licence/Registration/
+  Insurance, legacy write wall (410), storage_key never leaked, Restricted
+  binary gate.
+- Full regression across EB-02, EB-03, EB-05, EB-09, EB-R01, EB-R01C,
+  EB-R02, EB-R02C, EB-R03A, EB-R03B, EB-R03B-II + fix, MR-07A: **269 passed**.
+
+### Conflicts / owner decisions still required
+- None functional. Should ACE later split account admin off from Manager (a
+  dedicated `Accounts` role), that becomes a purely additive change to
+  `ACCOUNT_READ_ROLES` / `ACCOUNT_WRITE_ROLES` — no consumer needs to change.
+- MR-07B (full ACE permission matrix + frontend polish) remains a separate
+  package.
+
+### Confirmations
+- `main` untouched. Production untouched. No real ACE data migrated.
+- No new role added. No permission-policy engine. No Activation policy
+  change. No numbering policy change. No document policy redesign. No
+  out-of-scope changes.

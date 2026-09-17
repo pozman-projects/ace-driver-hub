@@ -671,6 +671,7 @@ def build_registers_router(db, get_current_user):
     # ------------------ DRIVERS ------------------
     @router.get("/drivers")
     async def list_drivers(include_archived: bool = False, current=Depends(get_current_user)):
+        from permissions import strip_driver_account_fields_many
         q = {} if include_archived else {"is_archived": {"$ne": True}}
         docs = await db[DRIVERS_COLL].find(q, {"_id": 0}).to_list(2000)
         # Ensure canonical fields exist on legacy docs (defensive)
@@ -679,21 +680,29 @@ def build_registers_router(db, get_current_user):
             d.setdefault("driver_status", d.get("status") or DriverStatus.Active.value)
             d.setdefault("is_archived", False)
             d.setdefault("updated_at", d.get("created_at") or _iso_now())
-        return docs
+        # MR-07A · Enforce sensitive-account read at the API boundary.
+        return strip_driver_account_fields_many(docs, current)
 
     @router.get("/drivers/{driver_id}")
     async def get_driver(driver_id: str, current=Depends(get_current_user)):
+        from permissions import strip_driver_account_fields
         doc = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
         if not doc:
             raise HTTPException(status_code=404, detail="Driver not found")
         doc.setdefault("full_name", doc.get("name") or "")
         doc.setdefault("driver_status", doc.get("status") or DriverStatus.Active.value)
         doc.setdefault("is_archived", False)
-        return doc
+        # MR-07A · Strip sensitive account fields for non-account roles.
+        return strip_driver_account_fields(doc, current)
 
     @router.post("/drivers", response_model=DriverRead)
     async def create_driver(payload: DriverCreate, current=Depends(get_current_user)):
         _require_write_role(current)
+        # MR-07A · Reject account-field writes by non-account roles.
+        from permissions import enforce_driver_account_write, strip_driver_account_fields
+        enforce_driver_account_write(
+            payload.model_dump(exclude_unset=True).keys(), current
+        )
         await _ensure_unique(db, DRIVERS_COLL, "driver_code", payload.driver_code)
         await _ensure_unique_dispatch(db, payload.dispatch_number)
         now = _iso_now()
@@ -716,11 +725,15 @@ def build_registers_router(db, get_current_user):
         )
         await db[DRIVERS_COLL].insert_one(doc)
         doc.pop("_id", None)
-        return doc
+        return strip_driver_account_fields(doc, current)
 
     @router.put("/drivers/{driver_id}", response_model=DriverRead)
     async def update_driver(driver_id: str, payload: DriverUpdate, current=Depends(get_current_user)):
         _require_write_role(current)
+        from permissions import enforce_driver_account_write, strip_driver_account_fields
+        # MR-07A · Reject account-field writes by non-account roles.
+        supplied_keys = payload.model_dump(exclude_unset=True).keys()
+        enforce_driver_account_write(supplied_keys, current)
         existing = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Driver not found")
@@ -742,7 +755,7 @@ def build_registers_router(db, get_current_user):
         updates["updated_by"] = current.get("email")
         await db[DRIVERS_COLL].update_one({"id": driver_id}, {"$set": updates})
         doc = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
-        return doc
+        return strip_driver_account_fields(doc, current)
 
     @router.delete("/drivers/{driver_id}")
     async def archive_driver(driver_id: str, current=Depends(get_current_user)):

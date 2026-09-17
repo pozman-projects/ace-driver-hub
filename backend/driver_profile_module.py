@@ -64,8 +64,12 @@ ALLOCATION_EVENTS_COLL = "number_allocation_events"
 
 ONBOARDING_COLL = "onboarding"
 
-SENSITIVE_ACCOUNT_FIELDS = {"business_name", "abn", "payroll_number", "payment_percentage"}
-ACCOUNT_READ_ROLES = {"Manager", "Admin"}
+from permissions import (
+    SENSITIVE_ACCOUNT_FIELDS,
+    ACCOUNT_READ_ROLES,
+    can_read_driver_account,
+    strip_driver_account_fields as _strip_account_fields,
+)
 
 NOTE_CATEGORIES = ["General", "Operations", "Compliance", "Accounts", "Incident", "Management", "Other"]
 NOTE_STATUSES = ["Active", "Superseded", "Archived"]
@@ -95,17 +99,6 @@ def _visible_note(role: str, category: str) -> bool:
 def _require_role(current: dict, allowed: set, err="Insufficient permissions"):
     if current.get("role") not in allowed:
         raise HTTPException(status_code=403, detail=err)
-
-
-def _strip_account_fields(driver: Optional[dict], role: str) -> Optional[dict]:
-    if not driver:
-        return driver
-    if role in ACCOUNT_READ_ROLES:
-        return driver
-    out = dict(driver)
-    for f in SENSITIVE_ACCOUNT_FIELDS:
-        out.pop(f, None)
-    return out
 
 
 # ─── Pydantic models ──────────────────────────────────────────────────────────

@@ -1915,3 +1915,43 @@ VehicleInsurancePolicy}`.
 - No pass expiry model. No Truck Photo gallery. No new taxonomy. No storage
   architecture change. No frontend compliance calc. `main` and Production
   untouched. No real ACE data migrated.
+
+---
+
+## EB-R03B-II-FIX — Profile Photo Display + Licence Canonical Pointer (2026-02-26)
+
+Two surgical fixes on top of EB-R03B-II. Scope strictly limited.
+
+### Fix 1 — Profile Photo actual thumbnail
+- `frontend/src/components/driver-cc/DriverDetailsCard.jsx` — new inner
+  `ProfilePhotoThumb` component fetches the current photo via
+  `GET /api/documents/{id}/preview` as a blob, renders it from an object
+  URL, and revokes the URL on unmount / documentId change. Loading, error
+  and empty states are distinct. Old placeholder box is replaced ONLY for
+  the "photo exists" branch; no card layout change.
+- Storage integrity unchanged: no `storage_key` exposed, no base64/bytes
+  on the Driver record. Thumbnail is 56×56 with `object-cover`.
+
+### Fix 2 — Licence evidence canonical pointer
+- `backend/driver_profile_module.py` — `driver_licence_evidence` now
+  resolves through the same `_resolve_evidence(record, entity_type)`
+  helper already used for Registration and Insurance:
+    1. `primary_licence.evidence_document_id` (authoritative), then
+    2. canonical primary `document_links` fallback, then
+    3. `None`.
+  Removes the previous "arbitrary first link" behaviour.
+
+### Tests
+- `backend/tests/test_ebr03b_ii_fix_licence_pointer.py` — 3 new
+  regression tests: pointer wins over arbitrary link; primary-link
+  fallback works when pointer absent; None when neither exists.
+- Full storage/documents/DCC regression: **67 passed**
+  (`test_ebr03b_ii_fix_licence_pointer` + `test_ebr03b_ii_inline_evidence`
+  + `test_ebr03b_documents_ux` + `test_ebr03a_storage_integrity`
+  + `test_documents_eb05` + `test_driver_profile_eb09`).
+
+### Confirmations
+- `main` untouched. Production untouched.
+- No storage/architecture/permissions/compliance/activation/passes
+  /truck-photos changes. No schema change. No data migration.
+- Card layout preserved. No new endpoints.

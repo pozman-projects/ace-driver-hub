@@ -377,19 +377,13 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
 
     profile_photo = next((d for d in documents if (d.get("document_type") or "").lower() == "profile photo" or (d.get("category") or "").lower() == "profile photo"), None)
     driver_contract = next((d for d in documents if (d.get("document_type") or "").lower() == "driver contract" or (d.get("category") or "").lower() == "driver contract"), None)
-    driver_licence_evidence = None
-    if primary_licence:
-        # Link licence to any Documents tagged to that Licence entity
-        lic_links = await db[DOCUMENT_LINKS_COLL].find(
-            {"entity_type": "DriverLicence", "entity_id": primary_licence["id"]},
-            {"_id": 0, "document_id": 1},
-        ).to_list(50)
-        if lic_links:
-            driver_licence_evidence = await db[DOCUMENTS_COLL].find_one(
-                {"id": lic_links[0]["document_id"], "is_archived": {"$ne": True}}, {"_id": 0},
-            )
 
-    # EB-R03B-II · Registration + Insurance evidence resolution for inline DCC actions.
+    # EB-R03B-II-FIX · Canonical evidence resolution. Same pattern for
+    # Licence / Registration / Insurance:
+    #   1. record.evidence_document_id (authoritative pointer)
+    #   2. canonical primary link on that record's entity (fallback)
+    #   3. None
+    # Never falls back to an arbitrary first link.
     async def _resolve_evidence(record, entity_type):
         if not record:
             return None
@@ -407,6 +401,7 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
             return await db[DOCUMENTS_COLL].find_one({"id": link["document_id"], "is_archived": {"$ne": True}}, {"_id": 0})
         return None
 
+    driver_licence_evidence = await _resolve_evidence(primary_licence, "DriverLicence")
     registration_evidence = await _resolve_evidence(primary_registration, "VehicleRegistration")
     insurance_evidence = await _resolve_evidence(primary_insurance, "VehicleInsurancePolicy")
 

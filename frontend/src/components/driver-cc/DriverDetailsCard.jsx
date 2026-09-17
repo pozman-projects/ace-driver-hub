@@ -1,8 +1,68 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../../lib/api";
 import { ROLE_CAN_EDIT, ManagementCard, InlineField, EditInput } from "./driverCCUtils";
 import EvidenceActions from "./EvidenceActions";
+
+/**
+ * EB-R03B-II-FIX · Render the ACTUAL current Profile Photo thumbnail via
+ * the authenticated `/api/documents/{id}/preview` endpoint. No storage_key
+ * is ever exposed to the browser; the image is retrieved as a blob and
+ * rendered from an object URL that is revoked on unmount or replacement.
+ */
+function ProfilePhotoThumb({ documentId }) {
+  const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    let obj = null;
+    setFailed(false);
+    setUrl(null);
+    if (!documentId) return () => {};
+    (async () => {
+      try {
+        const res = await api.get(`/documents/${documentId}/preview`, { responseType: "blob" });
+        if (cancelled) return;
+        obj = URL.createObjectURL(res.data);
+        setUrl(obj);
+      } catch (_e) {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [documentId]);
+
+  if (!documentId || failed) {
+    return (
+      <div
+        data-testid="dcc-profile-photo-fallback"
+        className="w-14 h-14 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-[9px] text-slate-500 uppercase tracking-widest"
+      >
+        Photo
+      </div>
+    );
+  }
+  if (!url) {
+    return (
+      <div
+        data-testid="dcc-profile-photo-loading"
+        className="w-14 h-14 rounded-md bg-slate-100 border border-slate-200 animate-pulse"
+      />
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt="Driver profile"
+      data-testid="dcc-profile-photo-img"
+      className="w-14 h-14 rounded-md object-cover border border-slate-200 bg-slate-100"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export default function DriverDetailsCard({ data, role, onSaved }) {
   const d = data.driver || {};
@@ -67,11 +127,12 @@ export default function DriverDetailsCard({ data, role, onSaved }) {
         <>
           <div className="flex items-start gap-3 pb-2 border-b border-slate-100 mb-2" data-testid="dcc-profile-photo-row">
             {photo?.id ? (
-              <div className="w-14 h-14 rounded-md overflow-hidden bg-slate-100 flex items-center justify-center text-[9px] text-slate-500 uppercase tracking-widest border border-slate-200">
-                Photo
-              </div>
+              <ProfilePhotoThumb documentId={photo.id} />
             ) : (
-              <div className="w-14 h-14 rounded-md bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center text-[9px] text-slate-400 uppercase tracking-widest">
+              <div
+                data-testid="dcc-profile-photo-empty"
+                className="w-14 h-14 rounded-md bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center text-[9px] text-slate-400 uppercase tracking-widest"
+              >
                 No Photo
               </div>
             )}

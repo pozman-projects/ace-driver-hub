@@ -1862,3 +1862,56 @@ subsequent package.
   card in place — same slot as before, richer content).
 - Out-of-scope areas untouched: activation, notifications, numbering,
   RBAC, reporting, generated PDF design, storage architecture.
+
+---
+
+## EB-R03B-II — Driver DCC Inline Evidence Upload/Replace (2026-02-26)
+
+Completes the deferred Parts 1–4 of EB-R03B. Inline Upload/Replace/Open on
+Driver Details (Profile Photo), Driver Licence, Truck Registration and Truck
+Insurance cards. 100% canonical: reuses `/api/documents/upload` and
+`/api/documents/{id}/versions`. No parallel photo store, no duplicate evidence
+truth. Backend already wires `evidence_document_id` via `EVIDENCE_HOLDERS`
+when `is_primary=true` and `entity_type ∈ {DriverLicence, VehicleRegistration,
+VehicleInsurancePolicy}`.
+
+### Backend
+- `backend/driver_profile_module.py::_aggregate_driver` adds
+  `documents.registration_evidence` and `documents.insurance_evidence`
+  resolved from `evidence_document_id` (falling back to canonical primary
+  link on the record's entity). Existing `documents.profile_photo` and
+  `documents.driver_licence_evidence` unchanged.
+
+### Frontend
+- `frontend/src/components/driver-cc/EvidenceActions.jsx` (**new**): compact,
+  card-scoped Present/Missing pill + Open + Upload/Replace. Upload uses
+  multipart POST `/documents/upload`; Replace uses POST
+  `/documents/{id}/versions` — no binary overwrite, full version history.
+  Open fetches auth'd `/documents/{id}/preview` and opens the blob URL in a
+  new tab. Controlled toasts on 401/403/404/410/other failures.
+- `DriverDetailsCard.jsx` — renders a Profile Photo row with EvidenceActions
+  when `canEdit`; upload payload sets `document_type=Profile Photo`,
+  `entity_type=Driver`, `entity_id=<driver.id>`, `is_primary=true`.
+- `DriverLicenceCard.jsx` — EvidenceActions bound to
+  `documents.driver_licence_evidence`; upload payload wires evidence to the
+  primary licence via `entity_type=DriverLicence`, `entity_id=<licence.id>`.
+- `TruckRegistrationCard.jsx` — bound to
+  `documents.registration_evidence`; upload payload `entity_type=VehicleRegistration`.
+- `TruckInsuranceCard.jsx` — bound to
+  `documents.insurance_evidence`; upload payload
+  `entity_type=VehicleInsurancePolicy`.
+- `DriverCommandCentre.jsx` — passes `role={role}` and `onSaved={refresh}`
+  to the three right-rail cards so the DCC payload refreshes after each
+  mutation.
+
+### Tests
+- `backend/tests/test_ebr03b_ii_inline_evidence.py` — 6 acceptance tests
+  covering all four evidence areas + storage-adapter + R03B-I regression.
+  **All 6 pass** against the live backend.
+- Storage + Documents + DCC regression: **64 passed** across `test_documents_eb05`,
+  `test_driver_profile_eb09`, `test_ebr03a`, `test_ebr03b`, `test_ebr03b_ii`.
+
+### Not changed
+- No pass expiry model. No Truck Photo gallery. No new taxonomy. No storage
+  architecture change. No frontend compliance calc. `main` and Production
+  untouched. No real ACE data migrated.

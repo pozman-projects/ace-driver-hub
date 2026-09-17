@@ -389,6 +389,27 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
                 {"id": lic_links[0]["document_id"], "is_archived": {"$ne": True}}, {"_id": 0},
             )
 
+    # EB-R03B-II · Registration + Insurance evidence resolution for inline DCC actions.
+    async def _resolve_evidence(record, entity_type):
+        if not record:
+            return None
+        eid = record.get("evidence_document_id")
+        if eid:
+            doc = await db[DOCUMENTS_COLL].find_one({"id": eid, "is_archived": {"$ne": True}}, {"_id": 0})
+            if doc:
+                return doc
+        # Fallback: canonical primary link on the record's entity
+        link = await db[DOCUMENT_LINKS_COLL].find_one(
+            {"entity_type": entity_type, "entity_id": record["id"], "is_primary": True, "is_archived": {"$ne": True}},
+            {"_id": 0, "document_id": 1},
+        )
+        if link:
+            return await db[DOCUMENTS_COLL].find_one({"id": link["document_id"], "is_archived": {"$ne": True}}, {"_id": 0})
+        return None
+
+    registration_evidence = await _resolve_evidence(primary_registration, "VehicleRegistration")
+    insurance_evidence = await _resolve_evidence(primary_insurance, "VehicleInsurancePolicy")
+
     # EB-R03B · Featured Documents / Passes / Photos buckets for DCC right rail.
     # Sources are canonical Documents + Document Links + evidence_document_id.
     # No parallel store, no free-text substitution.
@@ -537,6 +558,8 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
             "profile_photo": profile_photo,
             "driver_contract": driver_contract,
             "driver_licence_evidence": driver_licence_evidence,
+            "registration_evidence": registration_evidence,
+            "insurance_evidence": insurance_evidence,
             "stats": doc_stats,
         },
         "allocation_events": allocation_events,

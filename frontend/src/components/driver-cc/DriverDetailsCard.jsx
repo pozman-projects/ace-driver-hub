@@ -2,9 +2,11 @@ import React, { useRef, useState } from "react";
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../../lib/api";
 import { ROLE_CAN_EDIT, ManagementCard, InlineField, EditInput } from "./driverCCUtils";
+import EvidenceActions from "./EvidenceActions";
 
 export default function DriverDetailsCard({ data, role, onSaved }) {
   const d = data.driver || {};
+  const photo = data.documents?.profile_photo || null;
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -63,6 +65,41 @@ export default function DriverDetailsCard({ data, role, onSaved }) {
         </>
       ) : (
         <>
+          <div className="flex items-start gap-3 pb-2 border-b border-slate-100 mb-2" data-testid="dcc-profile-photo-row">
+            {photo?.id ? (
+              <div className="w-14 h-14 rounded-md overflow-hidden bg-slate-100 flex items-center justify-center text-[9px] text-slate-500 uppercase tracking-widest border border-slate-200">
+                Photo
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-md bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center text-[9px] text-slate-400 uppercase tracking-widest">
+                No Photo
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">
+                Profile Photo
+              </div>
+              <div className="text-[11px] text-slate-500 truncate">
+                {photo?.title || "Upload the driver's current profile photo"}
+              </div>
+              <EvidenceActions
+                evidenceDoc={photo}
+                canEdit={canEdit}
+                acceptHint="image/*"
+                uploadPayload={{
+                  title: `Profile Photo — ${d.full_name || d.id}`,
+                  document_type: "Profile Photo",
+                  entity_type: "Driver",
+                  entity_id: d.id,
+                  relationship_type: "Evidence",
+                  is_primary: "true",
+                  sensitivity: "Standard",
+                }}
+                onChanged={onSaved}
+                testidPrefix="dcc-photo"
+              />
+            </div>
+          </div>
           <InlineField label="Address" value={d.residential_address} testid="field-residential-address" />
           <InlineField label="Mobile" value={d.mobile_number ? <a href={`tel:${d.mobile_number}`} className="text-cyan-700 hover:underline">{d.mobile_number}</a> : null} testid="field-mobile" />
           <InlineField label="Email" value={d.email ? <a href={`mailto:${d.email}`} className="text-cyan-700 hover:underline">{d.email}</a> : null} testid="field-email" />

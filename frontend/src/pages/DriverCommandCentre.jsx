@@ -125,9 +125,9 @@ function CommandCentreInner({ driverId, sectionAnchor }) {
             {loading ? <SkeletonRight /> : data ? (
               <>
                 <ComplianceOverviewCard data={data} driverId={driverId} />
-                <DriverLicenceCard data={data} />
-                <TruckRegistrationCard data={data} />
-                <TruckInsuranceCard data={data} />
+                <DriverLicenceCard data={data} role={role} onSaved={refresh} />
+                <TruckRegistrationCard data={data} role={role} onSaved={refresh} />
+                <TruckInsuranceCard data={data} role={role} onSaved={refresh} />
                 <VehicleComplianceCard data={data} />
                 <DocumentsPassesPhotosCard data={data} driverId={driverId} />
               </>

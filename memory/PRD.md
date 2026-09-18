@@ -2387,3 +2387,53 @@ In case B the reservation could end up `Released` while the Driver kept the valu
 staging only · main untouched · Production untouched · backend unchanged · pre-write failures release reservations · post-write consume failures do NOT release reservations · successful consumes remain `Consumed` · numbering pools unchanged · status-transition logic unchanged · no Activation changes · no Owner/Carrier changes · no permission changes · no out-of-scope changes
 
 **FUNCTIONAL CONFORMANCE: PASS**
+
+---
+
+## MR-06 · Compliance Alerts + Notification Lifecycle (Feb 2026)
+
+Status: **DONE · staging only · main/Production untouched**
+
+### Audit summary
+| Concern | Status |
+|---|---|
+| Canonical status source | `_classify_expiry` (from `compliance_records.py`) — ONE source ✓ |
+| Dedup key | `_dedup_key(event_type, entity_type, entity_id, source_record_id)` — versioned by event_type (canonical, unchanged) |
+| Delivery | `NOTIFICATION_DELIVERY_ENABLED=false`, `EMAIL_PROVIDER=development`, `SMS_PROVIDER=development` — locked safe |
+| Scheduler | env-controlled; unchanged |
+| Auto-resolution | **Was missing — fixed here** |
+| Escalation | Existing rule creates a new event-type-specific notification; old severity now auto-resolved (below) |
+
+### Gap fixed — auto-resolution
+`_compliance_scan_impl` now calls a new helper `_auto_resolve_compliance_alerts` at the end of each scan. For every currently open (`Active | Snoozed | Acknowledged`) compliance notification, the helper checks the underlying canonical source:
+
+| Event type | Auto-resolve condition |
+|---|---|
+| `Compliance Missing` (Driver Licence) | driver now has a primary licence in this scan |
+| `Compliance Missing` (Vehicle Insurance) | vehicle now has a current insurance policy |
+| `Compliance Due Soon` | source `_classify_expiry` returns Compliant / Under Review / Expired |
+| `Compliance Expired` | source is renewed and `_classify_expiry` returns Compliant / Due Soon / Urgent / Under Review |
+| any compliance event | source record archived/deleted → resolve as stale |
+
+Resolution writes a canonical `Resolved` status with reason `"MR-06 auto-resolve · <detail>"`, preserving history. Never deletes.
+
+### Small canonical schema improvement
+`event_type` is now written directly onto each notification row (both `insert` and `update` paths in `emit_event`). This makes auto-resolve dedup/scoping efficient and keeps existing rows compatible via a lookup fallback on `notification_events`.
+
+### Files changed
+- `backend/notifications_module.py`
+- `backend/tests/test_mr06_notifications.py` — new · **6/6 pass** (Missing→Present→DueSoon→Expired→Renewed full lifecycle, Insurance Missing→Present, delivery safety guards, canonical-classifier-only source guard, activation-notifications isolation guard, Acknowledge does not change canonical, MR-04 regression)
+
+### Test results
+- MR-06 (fast + slow lifecycle): **6/6 pass** (~200s for the full-lifecycle test due to canonical scan pass covering ~1.1k records)
+- Combined MR-04B + MR-05 + MR-07A + MR-08A + MR-08A-FIX + MR-08A-FIX2 + legacy EB-08 fast suites: **102/102 green**
+
+### Confirmations
+staging only · main untouched · Production untouched · no real ACE data migrated · compliance thresholds unchanged · no duplicate expiry logic · notifications deduped by canonical (event_type, entity_type, entity_id, source_record_id) · resolved history preserved · scheduler unchanged · email disabled · SMS disabled · no Activation changes · no numbering changes · no Owner/Carrier changes · no new roles · no out-of-scope changes
+
+### Deferred (per spec)
+- **Outbound delivery policy** — remains owner decision
+- **Escalation timings** — remains owner decision
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: NOT CHANGED** (frontend surfaces untouched; auto-resolution runs backend-side)

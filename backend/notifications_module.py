@@ -812,6 +812,8 @@ class NotificationsEngine:
                 "updated_at": now,
                 "notification_event_id": event["notification_event_id"],
                 "notification_rule_id": rule["notification_rule_id"],
+                # MR-06 · ensure event_type is set on legacy rows for auto-resolve
+                "event_type": event["event_type"],
             }
             # Advance status from New → Active if untouched
             if existing.get("status") == NotificationStatus.New.value:
@@ -824,6 +826,7 @@ class NotificationsEngine:
             "notification_id": _uuid(),
             "notification_rule_id": rule["notification_rule_id"],
             "notification_event_id": event["notification_event_id"],
+            "event_type": event["event_type"],
             "entity_type": event["entity_type"],
             "entity_id": event["entity_id"],
             "source_record_id": event["source_record_id"],
@@ -1124,7 +1127,125 @@ class NotificationsEngine:
                            {"entity_label": label, "component": "Vehicle Insurance"},
                            source_status=ComplianceStatus.Missing.value)
 
+        # MR-06 · Auto-resolve stale compliance notifications. A notification
+        # is "stale" if the canonical source it referenced no longer matches
+        # the event severity it was created for. This runs once per scan and
+        # is idempotent — re-running with no source changes produces no work.
+        stats["notifications_resolved"] = await self._auto_resolve_compliance_alerts(
+            licences=licences, regs=regs, pols=pols,
+            drivers_seen_licence=seen_driver_licence,
+            vehicles_seen_ins=seen_veh_ins,
+            all_drivers=drivers, all_vehicles=vehicles,
+            correlation_id=run["correlation_id"],
+        )
+
         return stats
+
+    # ----------------------------------------------------------------------
+    # MR-06 · Auto-resolution helper
+    # ----------------------------------------------------------------------
+    async def _auto_resolve_compliance_alerts(
+        self, *, licences, regs, pols,
+        drivers_seen_licence, vehicles_seen_ins,
+        all_drivers, all_vehicles, correlation_id,
+    ) -> int:
+        """Resolve currently-Active/Snoozed/Acknowledged compliance
+        notifications whose canonical source condition no longer matches
+        the notification's event type. Preserves canonical event schema and
+        never deletes history.
+        """
+        # Build a fast lookup: source_record_id -> current canonical status
+        source_status = {}
+        # Licence records (primary, non-archived)
+        for lic in licences:
+            source_status[lic["id"]] = _classify_expiry(lic.get("expiry_date"))
+        for r in regs:
+            source_status[r["id"]] = _classify_expiry(r.get("expiry_date"))
+        for p in pols:
+            source_status[p["id"]] = _classify_expiry(p.get("expiry_date"))
+        # Missing-licence source_record_id is the driver_id itself
+        # → present if the driver appeared in seen_driver_licence
+        # Missing-insurance source_record_id is the vehicle_id itself.
+
+        # Load all currently-open compliance notifications. `event_type` is
+        # stored on new rows but may be missing on older rows — fall back to
+        # a lookup on `notification_events` when needed.
+        open_states = [NotificationStatus.Active.value,
+                        NotificationStatus.Snoozed.value,
+                        NotificationStatus.Acknowledged.value]
+        compliance_event_types = [
+            EventType.ComplianceDueSoon.value,
+            EventType.ComplianceExpired.value,
+            EventType.ComplianceMissing.value,
+        ]
+        cursor = self.db[NOTIFS_COLL].find(
+            {"status": {"$in": open_states}},
+            {"_id": 0},
+        )
+        resolved = 0
+        async for n in cursor:
+            ev = n.get("event_type")
+            if not ev:
+                # backfill by looking up the source event
+                src_ev = await self.db[EVENTS_COLL].find_one(
+                    {"notification_event_id": n.get("notification_event_id")},
+                    {"_id": 0, "event_type": 1},
+                )
+                ev = src_ev.get("event_type") if src_ev else None
+            if ev not in compliance_event_types:
+                continue
+            src_id = n.get("source_record_id")
+            payload = n.get("payload") or {}
+            component = payload.get("component") or ""
+            if not component:
+                # component name lives on the source event payload
+                src_ev = src_ev if 'src_ev' in dir() else None
+                src_ev = await self.db[EVENTS_COLL].find_one(
+                    {"notification_event_id": n.get("notification_event_id")},
+                    {"_id": 0, "payload": 1},
+                )
+                if src_ev:
+                    component = (src_ev.get("payload") or {}).get("component") or ""
+            entity_type = n.get("entity_type")
+            entity_id = n.get("entity_id")
+            reason = None
+
+            if ev == EventType.ComplianceMissing.value:
+                # Missing → present if the source record is now known.
+                if entity_type == EntityType.Driver.value and component == "Driver Licence":
+                    if entity_id in drivers_seen_licence:
+                        reason = "Driver Licence is now on file"
+                elif entity_type == EntityType.Vehicle.value and component == "Vehicle Insurance":
+                    if entity_id in vehicles_seen_ins:
+                        reason = "Vehicle Insurance is now on file"
+            else:
+                # DueSoon / Expired notifications reference a specific record.
+                # Skip if we didn't scan the source (archived / deleted).
+                current = source_status.get(src_id)
+                if current is None:
+                    # Underlying record archived or removed → the alert is stale.
+                    reason = f"Source record no longer active"
+                elif ev == EventType.ComplianceDueSoon.value:
+                    # Resolve DueSoon when canonical is Compliant OR now Expired
+                    # (Expired path emits its own alert; the old DueSoon is stale).
+                    if current in (ComplianceStatus.Compliant.value,
+                                    ComplianceStatus.UnderReview.value,
+                                    ComplianceStatus.Expired.value):
+                        reason = f"Canonical status is now {current}"
+                elif ev == EventType.ComplianceExpired.value:
+                    # Resolve Expired when the source is renewed and canonical
+                    # is again valid (Compliant / DueSoon / Urgent).
+                    if current in (ComplianceStatus.Compliant.value,
+                                    ComplianceStatus.DueSoon.value,
+                                    ComplianceStatus.Urgent.value,
+                                    ComplianceStatus.UnderReview.value):
+                        reason = f"Canonical status is now {current}"
+
+            if reason:
+                await self._resolve(n["notification_id"], "system",
+                                     f"MR-06 auto-resolve · {reason}")
+                resolved += 1
+        return resolved
 
     async def _critical_scan_impl(self, run: Dict[str, Any]) -> Dict[str, Any]:
         stats = {"records_scanned": 0, "events_created": 0, "notifications_created": 0,

@@ -2267,3 +2267,48 @@ Status: **DONE · staging only · main/Production untouched · no backend change
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL CONFORMANCE: PASS**
+
+---
+
+## MR-08A · Driver Code + Dispatch Numbering (Feb 2026)
+
+Status: **DONE · staging only · main/Production untouched**
+
+### Owner-locked decisions applied
+- **A**: 0 & 13 reserved for **Dispatch only** — no restriction added to Driver Code
+- **B**: Active Dispatch range = **[1, 99]** excluding 13; Inactive Dispatch = **[100, 999]** counted down from 999
+- **C**: Auto 999-down allocation triggers ONLY on transition INTO `Inactive`. `On Leave` / `Archived` / `Training` / `Probation` do NOT auto-renumber
+- **D**: On `Inactive → Active`, restore the driver's last active number if free; otherwise auto-allocate next `1–99` excluding 13
+
+### Backend changes (`numbering_module.py`, `registers.py`)
+- `ACTIVE_DISPATCH_CEILING` **999 → 99**. Active `reserve_dispatch` now rejects anything > 99.
+- `dispatch_available()` now clamps `reusable` + `next_new` to `[1, 99]`; returns `None` when no active slot fits.
+- `reactivate_driver(new_dispatch=None)` now performs canonical restore/allocate instead of requiring a caller-supplied value.
+- New `NumberingService._find_last_active_dispatch()`, `_next_available_active()`, `restore_or_allocate_active()`.
+- `allocate_inactive()` now requires `driver_status == "Inactive"` for the public endpoint path (`require_status_inactive=True` default). Internal callers pass `False`.
+- `PUT /api/drivers/{id}` hooks the driver-status transition:
+  - Active → Inactive → auto `allocate_inactive`
+  - Inactive → Active → auto `restore_or_allocate_active` (still gated by MR-04B readiness; failures don't block status write)
+  - On Leave / Archived / Training / Probation → no numbering mutation
+- `POST /numbering/dispatch/reactivate` — `value` is now optional (absent = automatic).
+
+### Frontend changes (`DriverSetupCard.jsx`)
+- In-card **Driver Code** editor: Keep / Automatic / Manual. `Preview` uses `GET /numbering/driver-code/suggestion` (non-mutating). Save reserves via `POST /numbering/driver-code/reserve` then persists via `PUT /drivers/{id}` (partial-failure releases the reservation).
+- In-card **Dispatch** manual edit — accepts active-pool numeric input; backend enforces 1–99 excluding 13. Inactive 999-down remains system-driven (not exposed as manual).
+- Extended driver-status dropdown to reflect canonical statuses: `Active, Training, Probation, On Leave, Inactive, Archived`.
+
+### Tests
+- `tests/test_mr08a_numbering.py` — **new** · 21 pass covering: suggestion non-mutation, unique automatic allocation + history, duplicate manual rejection, 0/13 not blocking Driver Code, active pool boundaries (0/13/100/500/999 rejected; valid values accepted), status-transition auto inactive, 999-down bound, On Leave unchanged, Archived unchanged, Inactive→Active restore-when-free, Inactive→Active auto-allocate-when-taken, reactivate without value = automatic, ReadOnly cannot mutate, MR-04B + MR-07A regressions.
+- Legacy `tests/test_numbering_eb08.py` — two tests updated to use `status="Inactive"` before allocating-inactive (aligns with MR-08A endpoint guard). All **33 pass**.
+- Combined MR-04B + MR-05 + MR-07A + MR-08A + legacy EB-08: **117/117 green.**
+
+### Confirmations
+- staging only · main untouched · Production untouched · no real ACE data migrated
+- Active Dispatch pool = 1–99 · Inactive Dispatch pool = 100–999 · 0/13 reserved for Dispatch only · Driver Code unaffected by 0/13
+- Only `Inactive` triggers 999-down · On Leave unchanged · Archived does not receive inactive number
+- Return to Active restores prior if free, else auto-allocates active
+- Numbering history preserved via canonical `number_allocation_events`
+- No Activation blocker added · No Owner/Carrier changes · No new roles · No out-of-scope changes
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: PASS**

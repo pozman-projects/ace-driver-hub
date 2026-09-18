@@ -49,7 +49,7 @@ RESERVED_DISPATCH_NUMBERS = {0, 13}
 INACTIVE_DISPATCH_START = 999
 INACTIVE_DISPATCH_FLOOR = 100  # inactive numbers live in [100, 999]
 ACTIVE_DISPATCH_FLOOR = 1
-ACTIVE_DISPATCH_CEILING = 999  # active operational numbers <= this
+ACTIVE_DISPATCH_CEILING = 99  # MR-08A locked · active range = [1, 99] excluding 13
 
 DEFAULT_RESERVATION_MINUTES = 15
 
@@ -384,15 +384,16 @@ class NumberingService:
         reserved = set(await self._reserved_dispatch_numbers())
         blocked = active | reserved | RESERVED_DISPATCH_NUMBERS
         max_active = max([n for n in active if n < INACTIVE_DISPATCH_FLOOR], default=0)
-        # Reusable = gaps in [1, max_active] excluding reserved and 0/13
+        # Reusable = gaps in [1, min(max_active, CEILING)] excluding reserved and 0/13
         reusable = [n for n in range(ACTIVE_DISPATCH_FLOOR,
-                                       min(max_active + 1, INACTIVE_DISPATCH_FLOOR))
+                                       min(max_active + 1, ACTIVE_DISPATCH_CEILING + 1))
                     if n not in blocked]
-        # Next new = max_active + 1, skipping reserved and 0/13
+        # Next new = max_active + 1, skipping reserved and 0/13, but MUST stay
+        # in the active pool [1, ACTIVE_DISPATCH_CEILING]
         candidate = max(max_active + 1, ACTIVE_DISPATCH_FLOOR)
         while candidate in blocked or candidate in RESERVED_DISPATCH_NUMBERS:
             candidate += 1
-        if candidate >= INACTIVE_DISPATCH_FLOOR:
+        if candidate > ACTIVE_DISPATCH_CEILING:
             candidate = None  # no active slot available
         return {
             "reusable": reusable,
@@ -430,6 +431,11 @@ class NumberingService:
         if n < ACTIVE_DISPATCH_FLOOR:
             raise HTTPException(status_code=400,
                                  detail=f"Dispatch Number {n} must be >= {ACTIVE_DISPATCH_FLOOR}")
+        # MR-08A · active pool = [1, 99] excluding reserved; 100+ belongs to
+        # the inactive pool and cannot be manually reserved as an active number.
+        if n > ACTIVE_DISPATCH_CEILING:
+            raise HTTPException(status_code=400,
+                                 detail=f"Dispatch Number {n} exceeds active pool ceiling {ACTIVE_DISPATCH_CEILING}")
         # Reject already active (excluding the current driver where relevant)
         active = set(await self._active_dispatch_numbers())
         # If a driver_id is supplied and that driver already owns n, allow it.
@@ -484,7 +490,8 @@ class NumberingService:
         return res
 
     async def allocate_inactive(self, driver_id: str, actor_email: str,
-                                  reason: Optional[str] = None) -> Dict[str, Any]:
+                                  reason: Optional[str] = None,
+                                  require_status_inactive: bool = True) -> Dict[str, Any]:
         used = set(await self._inactive_dispatch_numbers())
         candidate = INACTIVE_DISPATCH_START
         while candidate in used and candidate >= INACTIVE_DISPATCH_FLOOR:
@@ -492,12 +499,18 @@ class NumberingService:
         if candidate < INACTIVE_DISPATCH_FLOOR:
             raise HTTPException(status_code=409,
                                  detail="No inactive dispatch numbers available")
-        # Write directly to the driver record — no reservation required for
-        # inactive allocation (it happens synchronously when a driver moves
-        # to Inactive/Archived status).
         driver = await self.db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
         if not driver:
             raise HTTPException(status_code=404, detail="Driver not found")
+        # MR-08A · normal endpoint use only allocates for Drivers whose current
+        # status == Inactive. Internal callers (status-transition hooks) set
+        # require_status_inactive=False to skip this guard because they update
+        # status and dispatch in the same operation.
+        if require_status_inactive and driver.get("driver_status") != "Inactive":
+            raise HTTPException(
+                status_code=409,
+                detail="Inactive dispatch numbers may only be allocated to Drivers with status=Inactive",
+            )
         prev = driver.get("dispatch_number")
         await self.db[DRIVERS_COLL].update_one(
             {"id": driver_id},
@@ -514,8 +527,12 @@ class NumberingService:
 
     async def reactivate_driver(self, driver_id: str, new_dispatch: Any,
                                   actor_email: str) -> Dict[str, Any]:
+        # MR-08A · Normal reactivation is automatic (restore or allocate).
+        # Callers may still supply an explicit number as a manual override.
+        if new_dispatch in (None, ""):
+            return await self.restore_or_allocate_active(driver_id, actor_email)
         n = _parse_int(new_dispatch)
-        if n is None or n < ACTIVE_DISPATCH_FLOOR or n >= INACTIVE_DISPATCH_FLOOR \
+        if n is None or n < ACTIVE_DISPATCH_FLOOR or n > ACTIVE_DISPATCH_CEILING \
                 or n in RESERVED_DISPATCH_NUMBERS:
             raise HTTPException(status_code=400,
                                  detail="An active Dispatch Number in the active range is required")
@@ -547,6 +564,80 @@ class NumberingService:
         )
         return {"driver_id": driver_id, "dispatch_number": str(n), "previous": prev,
                 "reservation_id": res["reservation_id"]}
+
+    # ---------- MR-08A · status-driven active allocation ---------------------
+    async def _find_last_active_dispatch(self, driver_id: str) -> Optional[int]:
+        """Look through canonical allocation events for the most recent
+        ACTIVE dispatch value this driver held before going inactive."""
+        cursor = self.db[EVENTS_COLL].find(
+            {"driver_id": driver_id,
+             "identifier_type": IdentifierType.ActiveDispatch.value,
+             "action": {"$in": [
+                 AllocationAction.Allocated.value,
+                 AllocationAction.Reserved.value,
+                 AllocationAction.Reassigned.value,
+                 AllocationAction.Overridden.value,
+             ]}},
+            {"_id": 0, "identifier_value": 1, "created_at": 1},
+        ).sort("created_at", -1)
+        async for ev in cursor:
+            n = _parse_int(ev.get("identifier_value"))
+            if n is None:
+                continue
+            if ACTIVE_DISPATCH_FLOOR <= n <= ACTIVE_DISPATCH_CEILING \
+                    and n not in RESERVED_DISPATCH_NUMBERS:
+                return n
+        return None
+
+    async def _next_available_active(self) -> Optional[int]:
+        active = set(await self._active_dispatch_numbers())
+        for n in range(ACTIVE_DISPATCH_FLOOR, ACTIVE_DISPATCH_CEILING + 1):
+            if n in RESERVED_DISPATCH_NUMBERS:
+                continue
+            if n in active:
+                continue
+            return n
+        return None
+
+    async def restore_or_allocate_active(self, driver_id: str,
+                                          actor_email: str) -> Dict[str, Any]:
+        """MR-08A · On Inactive → Active transition:
+          1. Try to restore the driver's most recent previous active number.
+          2. Otherwise auto-allocate next available active number 1–99 ex 13.
+        """
+        driver = await self.db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
+        if not driver:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        prev = driver.get("dispatch_number")
+        active_in_use = set(await self._active_dispatch_numbers())
+        prior = await self._find_last_active_dispatch(driver_id)
+        chosen: Optional[int] = None
+        action_reason = None
+        if prior is not None and prior not in active_in_use:
+            chosen = prior; action_reason = f"Restored previous active {prior}"
+        else:
+            candidate = await self._next_available_active()
+            if candidate is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="No available active Dispatch Number in range 1–99",
+                )
+            chosen = candidate
+            action_reason = f"Auto-allocated active {candidate}" + (
+                f" (previous {prior} not free)" if prior is not None else "")
+        await self.db[DRIVERS_COLL].update_one(
+            {"id": driver_id},
+            {"$set": {"dispatch_number": str(chosen), "updated_at": _iso(),
+                       "updated_by": actor_email}},
+        )
+        await self._log_event(
+            IdentifierType.ActiveDispatch.value, chosen,
+            AllocationAction.Reassigned.value, actor_email,
+            automatic=True, driver_id=driver_id,
+            reason=action_reason + f" (previous number {prev})",
+        )
+        return {"driver_id": driver_id, "dispatch_number": str(chosen),
+                "previous": prev, "restored": (chosen == prior)}
 
     # ------------------------------------------------ reservation lifecycle
     async def release_reservation(self, reservation_id: str, actor_email: str,
@@ -931,10 +1022,11 @@ def build_numbering_router(db, get_current_user):
     async def dispatch_reactivate(payload: Dict[str, Any],
                                     current=Depends(get_current_user)):
         _require_role(current, ("Admin", "Manager"))
-        if not payload.get("driver_id") or payload.get("value") in (None, ""):
-            raise HTTPException(status_code=400,
-                                 detail="driver_id + value required")
-        return await svc.reactivate_driver(payload["driver_id"], payload["value"],
+        if not payload.get("driver_id"):
+            raise HTTPException(status_code=400, detail="driver_id required")
+        # MR-08A · value is now optional. Absent value = automatic
+        # restore-or-allocate. Present value = explicit manual override.
+        return await svc.reactivate_driver(payload["driver_id"], payload.get("value"),
                                              current.get("email"))
 
     @router.get("/numbering/dispatch/reservations")

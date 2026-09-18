@@ -1,6 +1,30 @@
-import React, { useRef, useState } from "react";
+/**
+ * MR-08A · Driver Setup Card — Driver Code + Dispatch #
+ *
+ * View mode:
+ *   - Driver Code (canonical)
+ *   - Dispatch Number (canonical, may be inactive 100–999 for Inactive drivers)
+ *   - Start Date, Driver Status, Contract link, history link
+ *
+ * Edit mode:
+ *   - Driver Code: current + suggestion preview (`GET /numbering/driver-code/suggestion`,
+ *                  non-mutating) + Auto or Manual choice. Save performs canonical
+ *                  reserve + driver update (allocation is the last mutation so
+ *                  reservation is not orphaned unnecessarily).
+ *   - Dispatch: current + manual active edit ONLY (1–99 excl 13). Inactive 999-down
+ *               is system-driven on status transition — not exposed as a manual pick.
+ *   - Start Date + Status remain editable.
+ *
+ * Backend authorities:
+ *   POST /numbering/driver-code/reserve  (automatic or manual)
+ *   PUT  /drivers/{id}                    (persists driver_code, driver_status, start_date)
+ *   POST /numbering/dispatch/reserve      (active reservation)
+ *
+ * Backend owns collision + reserved (0/13) + range validation.
+ */
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CaretRight } from "@phosphor-icons/react";
+import { CaretRight, ArrowsClockwise } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../../lib/api";
 import { ROLE_CAN_EDIT, ManagementCard, InlineField, EditInput } from "./driverCCUtils";
@@ -12,26 +36,91 @@ export default function DriverSetupCard({ data, role, onSaved }) {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const initial = useRef({});
+  const [codeSuggestion, setCodeSuggestion] = useState(null);
+  const [codeMode, setCodeMode] = useState("keep"); // keep | auto | manual
 
   const startEdit = () => {
     const f = {
       start_date: d.start_date || "",
       driver_status: d.driver_status || "Active",
+      driver_code: d.driver_code || "",
+      dispatch_number: d.dispatch_number || "",
     };
     initial.current = f;
     setForm(f);
+    setCodeMode("keep");
+    setCodeSuggestion(null);
     setEditing(true);
   };
-  const dirty = editing && JSON.stringify(form) !== JSON.stringify(initial.current);
+  const dirty = editing && (
+    JSON.stringify({ start_date: form.start_date, driver_status: form.driver_status }) !==
+    JSON.stringify({ start_date: initial.current.start_date, driver_status: initial.current.driver_status })
+    || codeMode !== "keep"
+    || form.dispatch_number !== (initial.current.dispatch_number || "")
+  );
+
+  const previewCode = useCallback(async () => {
+    // Non-mutating: uses /suggestion only (never /reserve).
+    try {
+      const { data: s } = await api.get("/numbering/driver-code/suggestion");
+      setCodeSuggestion(s.suggested_driver_code);
+    } catch {
+      setCodeSuggestion(null);
+      toast.error("Suggestion unavailable");
+    }
+  }, []);
+
   const save = async () => {
     setSaving(true);
+    let reservationId = null;
     try {
-      await api.put(`/drivers/${d.id}`, form);
+      const patch = {};
+      if (form.start_date !== initial.current.start_date) patch.start_date = form.start_date;
+      if (form.driver_status !== initial.current.driver_status) patch.driver_status = form.driver_status;
+
+      // Driver Code allocation (canonical reserve → consume via PUT)
+      if (codeMode === "auto") {
+        const { data: res } = await api.post("/numbering/driver-code/reserve", {});
+        reservationId = res.reservation_id;
+        patch.driver_code = res.identifier_value;
+      } else if (codeMode === "manual") {
+        const raw = String(form.driver_code || "").trim();
+        if (!raw) throw new Error("Driver Code is required for manual allocation");
+        if (raw !== (initial.current.driver_code || "")) {
+          const { data: res } = await api.post("/numbering/driver-code/reserve",
+                                               { value: raw, manual: true });
+          reservationId = res.reservation_id;
+          patch.driver_code = res.identifier_value;
+        }
+      }
+      // Dispatch: only surface manual ACTIVE edits (1-99 excl 13). Backend
+      // owns validation. Inactive 999-down is triggered by status.
+      const newDispatch = String(form.dispatch_number || "").trim();
+      const priorDispatch = String(initial.current.dispatch_number || "").trim();
+      if (newDispatch !== priorDispatch && newDispatch !== "") {
+        const { data: res } = await api.post("/numbering/dispatch/reserve",
+                                             { value: Number(newDispatch), driver_id: d.id });
+        patch.dispatch_number = res.dispatch_number;
+        // Consume via driver PUT below writes dispatch_number
+      }
+
+      if (Object.keys(patch).length) {
+        await api.put(`/drivers/${d.id}`, patch);
+      }
       toast.success("Driver setup saved");
       setEditing(false);
+      setCodeMode("keep");
+      setCodeSuggestion(null);
       await onSaved?.();
     } catch (err) {
-      toast.error(formatApiErrorDetail(err?.response?.data?.detail) || "Save failed");
+      // Partial-failure: if we durably reserved a Driver Code but the PUT
+      // failed, release the reservation to avoid orphans.
+      if (reservationId) {
+        try { await api.post("/numbering/driver-code/release", { reservation_id: reservationId }); }
+        catch { /* best-effort */ }
+      }
+      toast.error(formatApiErrorDetail(err?.response?.data?.detail) || err.message || "Save failed");
+      await onSaved?.();
     } finally { setSaving(false); }
   };
 
@@ -43,20 +132,68 @@ export default function DriverSetupCard({ data, role, onSaved }) {
 
   return (
     <ManagementCard
-      testid="card-driver-setup"
-      section="driver-setup"
-      title="Driver Setup"
-      subtitle="Identifiers, status, contract"
+      testid="card-driver-setup" section="driver-setup"
+      title="Driver Setup" subtitle="Identifiers, status, contract"
       canEdit={canEdit}
-      editing={editing}
-      saving={saving}
-      dirty={dirty}
+      editing={editing} saving={saving} dirty={dirty}
       onEditToggle={startEdit}
-      onCancel={() => setEditing(false)}
+      onCancel={() => { setEditing(false); setCodeMode("keep"); setCodeSuggestion(null); }}
       onSave={save}
     >
       {editing ? (
         <>
+          {/* Driver Code (Auto / Manual / Keep) */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500 mb-1">Driver Code</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                data-testid="driver-code-mode"
+                value={codeMode}
+                onChange={(e) => setCodeMode(e.target.value)}
+                className="border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+              >
+                <option value="keep">Keep {d.driver_code ? `(#${d.driver_code})` : "current"}</option>
+                <option value="auto">Automatic (next available)</option>
+                <option value="manual">Manual…</option>
+              </select>
+              {codeMode === "manual" && (
+                <input
+                  data-testid="driver-code-manual-input"
+                  value={form.driver_code || ""}
+                  onChange={(e) => setForm({ ...form, driver_code: e.target.value })}
+                  placeholder="Driver Code"
+                  className="w-32 border border-slate-200 rounded-md px-2 py-1.5 text-sm font-mono"
+                />
+              )}
+              {codeMode === "auto" && (
+                <button
+                  type="button"
+                  data-testid="driver-code-preview-btn"
+                  onClick={previewCode}
+                  className="text-[11px] px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"
+                ><ArrowsClockwise size={11} /> Preview</button>
+              )}
+            </div>
+            {codeMode === "auto" && codeSuggestion && (
+              <div className="text-[11px] text-slate-500 mt-1" data-testid="driver-code-suggestion">
+                Suggestion: <b className="font-mono">{codeSuggestion}</b> — reserved on Save
+              </div>
+            )}
+          </div>
+
+          {/* Dispatch (manual active only) */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500 mb-1">Dispatch #</div>
+            <input
+              data-testid="edit-dispatch-number"
+              value={form.dispatch_number || ""}
+              onChange={(e) => setForm({ ...form, dispatch_number: e.target.value.replace(/[^0-9]/g, "") })}
+              placeholder="1–99 excl 13"
+              className="w-32 border border-slate-200 rounded-md px-2 py-1.5 text-sm font-mono"
+            />
+            <div className="text-[10px] text-slate-500 mt-0.5">Inactive numbers are allocated automatically by status.</div>
+          </div>
+
           <EditInput label="Start Date" type="date" value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} testid="edit-start-date" />
           <div>
             <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500 mb-1">Status</div>
@@ -66,7 +203,7 @@ export default function DriverSetupCard({ data, role, onSaved }) {
               data-testid="edit-driver-status"
               className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
             >
-              {["Active", "Inactive", "On Leave", "Archived"].map((s) => <option key={s} value={s}>{s}</option>)}
+              {["Active", "Training", "Probation", "On Leave", "Inactive", "Archived"].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
         </>
@@ -81,11 +218,8 @@ export default function DriverSetupCard({ data, role, onSaved }) {
             <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500">Contract</div>
             <div className="text-sm">
               {contract ? (
-                <Link
-                  to={`/documents?doc=${contract.id}`}
-                  data-testid="driver-contract-link"
-                  className="text-cyan-700 hover:underline inline-flex items-center gap-1"
-                >
+                <Link to={`/documents?doc=${contract.id}`} data-testid="driver-contract-link"
+                      className="text-cyan-700 hover:underline inline-flex items-center gap-1">
                   Open contract <CaretRight size={11} />
                 </Link>
               ) : <span data-testid="driver-contract-empty" className="text-slate-300">Not on file</span>}

@@ -784,6 +784,31 @@ def build_registers_router(db, get_current_user):
         updates["updated_at"] = _iso_now()
         updates["updated_by"] = current.get("email")
         await db[DRIVERS_COLL].update_one({"id": driver_id}, {"$set": updates})
+
+        # MR-08A · Status-driven Dispatch allocation. Runs AFTER the driver
+        # status is persisted so the canonical status check inside
+        # `allocate_inactive` sees the new value. On failure we log but do NOT
+        # roll back the status change — numbering issues surface via history.
+        if incoming_status and incoming_status != prior_status:
+            from numbering_module import NumberingService
+            nsvc = NumberingService(db)
+            try:
+                if (incoming_status == DriverStatus.Inactive.value
+                        and prior_status != DriverStatus.Inactive.value):
+                    await nsvc.allocate_inactive(
+                        driver_id, current.get("email"),
+                        reason=f"Auto: {prior_status} -> Inactive",
+                    )
+                elif (incoming_status == DriverStatus.Active.value
+                        and prior_status == DriverStatus.Inactive.value):
+                    await nsvc.restore_or_allocate_active(
+                        driver_id, current.get("email"),
+                    )
+            except HTTPException:
+                # numbering issues surface via history/events; don't block the
+                # driver-status update itself
+                pass
+
         doc = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
         return strip_driver_account_fields(doc, current)
 

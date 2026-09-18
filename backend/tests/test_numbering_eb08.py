@@ -302,7 +302,7 @@ def test_automatic_reservation_prefers_reusable(admin_headers):
 
 
 def test_inactive_allocation_starts_at_999(admin_headers):
-    d = _create_driver(admin_headers, "EB08 Inactivate", status="Active",
+    d = _create_driver(admin_headers, "EB08 Inactivate", status="Inactive",
                         dispatch=None)
     try:
         r = requests.post(f"{API}/numbering/dispatch/allocate-inactive",
@@ -313,7 +313,7 @@ def test_inactive_allocation_starts_at_999(admin_headers):
         n = int(r.json()["dispatch_number"])
         assert 100 <= n <= 999
         # Allocate a second driver — should be lower
-        d2 = _create_driver(admin_headers, "EB08 Inactivate2", status="Active",
+        d2 = _create_driver(admin_headers, "EB08 Inactivate2", status="Inactive",
                               dispatch=None)
         try:
             r2 = requests.post(f"{API}/numbering/dispatch/allocate-inactive",
@@ -328,7 +328,7 @@ def test_inactive_allocation_starts_at_999(admin_headers):
 
 
 def test_reactivate_requires_valid_active_number(admin_headers):
-    d = _create_driver(admin_headers, "EB08 Reactivate", status="Active",
+    d = _create_driver(admin_headers, "EB08 Reactivate", status="Inactive",
                         dispatch=None)
     try:
         # Assign inactive first
@@ -496,22 +496,21 @@ def test_concurrent_auto_reserve_no_dup(admin_headers):
 #  Historical dispatch snapshot preserved
 # ================================================================
 def test_dispatch_snapshot_preserved_on_inactive(admin_headers):
-    # Give driver an active dispatch, then move to inactive
+    # MR-08A · Move driver into Inactive via canonical PUT (which auto-allocates
+    # 999-down). Historical dispatch must remain in canonical numbering history.
     avail = requests.get(f"{API}/numbering/dispatch/available",
                           headers=admin_headers, timeout=20).json()
     n = avail["next_new"] or 500
     d = _create_driver(admin_headers, "EB08 Snapshot", dispatch=str(n),
                         status="Active")
     try:
-        r = requests.post(f"{API}/numbering/dispatch/allocate-inactive",
-                           json={"driver_id": d["id"]},
-                           headers=admin_headers, timeout=20)
-        assert r.status_code == 200
-        # Historical assignment snapshots in driver_vehicle_assignments must
-        # remain unchanged. We simply verify the driver record moved and no
-        # crash happens on subsequent reads.
+        r = requests.put(f"{API}/drivers/{d['id']}",
+                          json={"driver_status": "Inactive"},
+                          headers=admin_headers, timeout=20)
+        assert r.status_code == 200, r.text
         drv = requests.get(f"{API}/drivers/{d['id']}",
                              headers=admin_headers, timeout=20).json()
         assert drv["dispatch_number"] != str(n)
+        assert 100 <= int(drv["dispatch_number"]) <= 999
     finally:
         _delete_driver(admin_headers, d["id"])

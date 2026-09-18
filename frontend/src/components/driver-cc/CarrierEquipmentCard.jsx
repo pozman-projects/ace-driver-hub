@@ -70,6 +70,7 @@ export default function CarrierEquipmentCard({ data, role, driverId, onSaved }) 
 
   const save = async () => {
     setSaving(true);
+    let reassignmentDone = false;
     try {
       // 1) Primary Vehicle reassignment
       if (pendingVehicle && pendingVehicle.id !== vehicle?.id) {
@@ -82,14 +83,18 @@ export default function CarrierEquipmentCard({ data, role, driverId, onSaved }) 
           is_primary: true,
           start_date: new Date().toISOString().slice(0, 10),
         });
+        reassignmentDone = true;
       }
-      // 2) Vehicle field edits (config / status) — on the effective vehicle
-      const effVehicleId = pendingVehicle?.id || vehicle?.id;
-      if (effVehicleId && vDraft && !pendingVehicle) {
+      // 2) Vehicle field edits — MR-05-FIX Defect 1:
+      // Draft is always compared against the EFFECTIVE vehicle (selected new
+      // vehicle if pending, else current). We never silently drop visible edits.
+      const effVehicle = pendingVehicle || vehicle;
+      const effVehicleId = effVehicle?.id;
+      if (effVehicleId && vDraft) {
         const patch = {};
-        if (vDraft.carrier_configuration !== (vehicle?.carrier_configuration || ""))
+        if (vDraft.carrier_configuration !== (effVehicle?.carrier_configuration || ""))
           patch.carrier_configuration = vDraft.carrier_configuration;
-        if (vDraft.vehicle_status !== (vehicle?.vehicle_status || ""))
+        if (vDraft.vehicle_status !== (effVehicle?.vehicle_status || ""))
           patch.vehicle_status = vDraft.vehicle_status;
         if (Object.keys(patch).length) {
           await api.put(`/vehicles/${effVehicleId}`, patch);
@@ -119,6 +124,11 @@ export default function CarrierEquipmentCard({ data, role, driverId, onSaved }) 
       onSaved && onSaved();
     } catch (e) {
       toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Save failed");
+      // MR-05-FIX Defect 1 · Partial-failure: refresh canonical state so the
+      // UI does not keep displaying stale pre-save relationships.
+      if (reassignmentDone && onSaved) {
+        try { await onSaved(); } catch { /* ignore */ }
+      }
     } finally { setSaving(false); }
   };
 
@@ -195,7 +205,14 @@ function EditMode({
       <VehiclePicker
         currentVehicle={vehicle}
         pendingVehicle={pendingVehicle}
-        onSelect={setPendingVehicle}
+        onSelect={(v) => {
+          // MR-05-FIX Defect 1 · reset draft to the SELECTED vehicle's canonical values
+          setPendingVehicle(v);
+          setVDraft({
+            carrier_configuration: v?.carrier_configuration || "",
+            vehicle_status: v?.vehicle_status || "",
+          });
+        }}
       />
       <label className="block">
         <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500 mb-1">Config</div>

@@ -2234,3 +2234,36 @@ Status: **DONE · staging only · main untouched**
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL & INTERACTION CONFORMANCE: PASS** (3×3 preserved; in-card view↔edit toggle; compact pickers; pending banners)
+
+---
+
+## MR-05-FIX · Carrier Pending-Vehicle Edit Consistency + Owner Label (Feb 2026)
+
+Status: **DONE · staging only · main/Production untouched · no backend changes**
+
+### Defects fixed
+1. **Carrier pending-Vehicle draft** — `CarrierEquipmentCard.jsx`:
+   - When a new Vehicle is selected in the picker, `vDraft` is now reset from the SELECTED vehicle's canonical `carrier_configuration` and `vehicle_status`.
+   - `save()` compares the draft against the **effective vehicle** (`pendingVehicle || vehicle`); the old `!pendingVehicle` guard was removed, so visible field edits are never silently discarded.
+   - Save order: reassignment → PUT effective vehicle fields → Tray → Trailer.
+   - Partial-failure path: if reassignment succeeded and a later mutation throws, `onSaved()` is still called to refresh canonical DCC state.
+2. **Owner card label** — `OwnerDetailsCard.jsx`: view + edit label changed from `Truck Owner` to `Truck Ownership`. Source remains `primary Vehicle.ownership_model`. No data/model change.
+
+### Files changed
+- `frontend/src/components/driver-cc/CarrierEquipmentCard.jsx`
+- `frontend/src/components/driver-cc/OwnerDetailsCard.jsx`
+- `backend/tests/test_mr05_fix_carrier_owner.py` — new · **6/6 pass**
+
+### Deferred (recorded per spec)
+- **Owner/relationship permission-policy inconsistency deferred to MR-07B.**
+  - Backend Owner CRUD blocks only ReadOnly.
+  - Frontend `ROLE_CAN_EDIT` = Admin/Manager/Allocator.
+  - Not fixed in MR-05-FIX per instructions.
+
+### Confirmations
+- staging only · main untouched · Production untouched
+- No backend files changed · no permission changes · no relationship service changes · no coupling rule changes
+- Test suites green: MR-05 (16 + 5) + MR-05-FIX (6) + MR-04B (18) + MR-07A (23) → **68/68**
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL CONFORMANCE: PASS**

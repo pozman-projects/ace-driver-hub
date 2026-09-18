@@ -103,7 +103,7 @@ export default function OwnerDetailsCard({ data, role, driverId, onSaved }) {
       {!editing ? (
         <>
           <InlineField label="Driving For" value={owner?.name} testid="owner-driving-for" />
-          <InlineField label="Truck Owner" value={vehicle?.ownership_model} testid="owner-truck-ownership" />
+          <InlineField label="Truck Ownership" value={vehicle?.ownership_model} testid="owner-truck-ownership" />
           <InlineField label="Owner Mobile" value={owner?.mobile_number} testid="owner-mobile" />
           <InlineField label="Owner Email" value={owner?.email} testid="owner-email" />
           {relationship?.start_date && (
@@ -140,7 +140,7 @@ export default function OwnerDetailsCard({ data, role, driverId, onSaved }) {
             onChange={(v) => setContactDraft((s) => ({ ...s, email: v }))}
             testid="owner-email-input"
           />
-          <InlineField label="Truck Owner" value={vehicle?.ownership_model} testid="owner-truck-ownership-readonly" />
+          <InlineField label="Truck Ownership" value={vehicle?.ownership_model} testid="owner-truck-ownership-readonly" />
         </>
       )}
       {createOpen && (

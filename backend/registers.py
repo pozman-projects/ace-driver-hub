@@ -772,6 +772,60 @@ def build_registers_router(db, get_current_user):
                         ],
                     },
                 )
+        # MR-08A-FIX Defect 2 · Status transition integrity. Compute the target
+        # Dispatch value BEFORE persisting the status change so a numbering
+        # failure never leaves the driver in an inconsistent state (Inactive
+        # with active-pool number or Active with inactive-pool number).
+        # Numbering AND status are then committed in a single update_one.
+        target_dispatch = None
+        transition_note = None
+        transition_action = None  # allocated | reassigned
+        if incoming_status and incoming_status != prior_status:
+            from numbering_module import (
+                NumberingService, INACTIVE_DISPATCH_START, INACTIVE_DISPATCH_FLOOR,
+                RESERVED_DISPATCH_NUMBERS, IdentifierType, AllocationAction,
+            )
+            nsvc = NumberingService(db)
+            if (incoming_status == DriverStatus.Inactive.value
+                    and prior_status != DriverStatus.Inactive.value):
+                used = set(await nsvc._inactive_dispatch_numbers())
+                candidate = INACTIVE_DISPATCH_START
+                while candidate in used and candidate >= INACTIVE_DISPATCH_FLOOR:
+                    candidate -= 1
+                if candidate < INACTIVE_DISPATCH_FLOOR:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Cannot transition to Inactive — no inactive Dispatch Number available",
+                    )
+                target_dispatch = str(candidate)
+                transition_note = (f"Auto: {prior_status} -> Inactive "
+                                     f"(previous #{current.get('dispatch_number') or '—'})")
+                transition_action = AllocationAction.Allocated.value
+                target_identifier_type = IdentifierType.InactiveDispatch.value
+            elif (incoming_status == DriverStatus.Active.value
+                    and prior_status == DriverStatus.Inactive.value):
+                active_in_use = set(await nsvc._active_dispatch_numbers())
+                prior_number = await nsvc._find_last_active_dispatch(driver_id)
+                chosen = None
+                if prior_number is not None and prior_number not in active_in_use:
+                    chosen = prior_number
+                    transition_note = f"Restored previous active {prior_number}"
+                else:
+                    n = await nsvc._next_available_active()
+                    if n is None:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Cannot transition to Active — no available active Dispatch Number in range 1–99",
+                        )
+                    chosen = n
+                    transition_note = (
+                        f"Auto-allocated active {n}"
+                        + (f" (previous {prior_number} not free)"
+                           if prior_number is not None else ""))
+                target_dispatch = str(chosen)
+                transition_action = AllocationAction.Reassigned.value
+                target_identifier_type = IdentifierType.ActiveDispatch.value
+
         # Mirror canonical → legacy on update where relevant
         if "full_name" in updates:
             updates["name"] = updates["full_name"]
@@ -781,33 +835,22 @@ def build_registers_router(db, get_current_user):
             updates["phone"] = updates["mobile_number"] or ""
         if "driver_status" in updates:
             updates["status"] = updates["driver_status"]
+        if target_dispatch is not None:
+            # Commit status + dispatch atomically in one $set
+            updates["dispatch_number"] = target_dispatch
         updates["updated_at"] = _iso_now()
         updates["updated_by"] = current.get("email")
         await db[DRIVERS_COLL].update_one({"id": driver_id}, {"$set": updates})
 
-        # MR-08A · Status-driven Dispatch allocation. Runs AFTER the driver
-        # status is persisted so the canonical status check inside
-        # `allocate_inactive` sees the new value. On failure we log but do NOT
-        # roll back the status change — numbering issues surface via history.
-        if incoming_status and incoming_status != prior_status:
+        # Numbering history event (only after the atomic write succeeded)
+        if target_dispatch is not None:
             from numbering_module import NumberingService
             nsvc = NumberingService(db)
-            try:
-                if (incoming_status == DriverStatus.Inactive.value
-                        and prior_status != DriverStatus.Inactive.value):
-                    await nsvc.allocate_inactive(
-                        driver_id, current.get("email"),
-                        reason=f"Auto: {prior_status} -> Inactive",
-                    )
-                elif (incoming_status == DriverStatus.Active.value
-                        and prior_status == DriverStatus.Inactive.value):
-                    await nsvc.restore_or_allocate_active(
-                        driver_id, current.get("email"),
-                    )
-            except HTTPException:
-                # numbering issues surface via history/events; don't block the
-                # driver-status update itself
-                pass
+            await nsvc._log_event(
+                target_identifier_type, int(target_dispatch),
+                transition_action, current.get("email"),
+                automatic=True, driver_id=driver_id, reason=transition_note,
+            )
 
         doc = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
         return strip_driver_account_fields(doc, current)

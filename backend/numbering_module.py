@@ -578,8 +578,8 @@ class NumberingService:
                  AllocationAction.Reassigned.value,
                  AllocationAction.Overridden.value,
              ]}},
-            {"_id": 0, "identifier_value": 1, "created_at": 1},
-        ).sort("created_at", -1)
+            {"_id": 0, "identifier_value": 1, "performed_at": 1},
+        ).sort("performed_at", -1)
         async for ev in cursor:
             n = _parse_int(ev.get("identifier_value"))
             if n is None:

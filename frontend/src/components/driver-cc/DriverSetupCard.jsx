@@ -72,16 +72,20 @@ export default function DriverSetupCard({ data, role, onSaved }) {
 
   const save = async () => {
     setSaving(true);
-    let reservationId = null;
+    let codeReservationId = null;
+    let dispatchReservationId = null;
+    // Track whether each reservation was actually consumed on the backend
+    let codeConsumed = false;
+    let dispatchConsumed = false;
     try {
       const patch = {};
       if (form.start_date !== initial.current.start_date) patch.start_date = form.start_date;
       if (form.driver_status !== initial.current.driver_status) patch.driver_status = form.driver_status;
 
-      // Driver Code allocation (canonical reserve → consume via PUT)
+      // Driver Code allocation (canonical reserve → PUT → consume)
       if (codeMode === "auto") {
         const { data: res } = await api.post("/numbering/driver-code/reserve", {});
-        reservationId = res.reservation_id;
+        codeReservationId = res.reservation_id;
         patch.driver_code = res.identifier_value;
       } else if (codeMode === "manual") {
         const raw = String(form.driver_code || "").trim();
@@ -89,34 +93,61 @@ export default function DriverSetupCard({ data, role, onSaved }) {
         if (raw !== (initial.current.driver_code || "")) {
           const { data: res } = await api.post("/numbering/driver-code/reserve",
                                                { value: raw, manual: true });
-          reservationId = res.reservation_id;
+          codeReservationId = res.reservation_id;
           patch.driver_code = res.identifier_value;
         }
       }
-      // Dispatch: only surface manual ACTIVE edits (1-99 excl 13). Backend
-      // owns validation. Inactive 999-down is triggered by status.
-      const newDispatch = String(form.dispatch_number || "").trim();
+      // MR-08A-FIX Defect 4 · When target status is Inactive, do NOT reserve
+      // any manual active Dispatch. Backend allocates 100-999 automatically.
+      // Same applies when the driver already holds an inactive number and
+      // the target is Active — backend restores/allocates 1-99.
+      const targetStatus = form.driver_status;
       const priorDispatch = String(initial.current.dispatch_number || "").trim();
-      if (newDispatch !== priorDispatch && newDispatch !== "") {
+      const newDispatch = String(form.dispatch_number || "").trim();
+      const priorStatus = initial.current.driver_status;
+      const priorIsInactive = priorStatus === "Inactive";
+      const targetIsInactive = targetStatus === "Inactive";
+      const statusTransitionAutoDispatch =
+        (targetIsInactive && !priorIsInactive) ||
+        (targetStatus === "Active" && priorIsInactive);
+      const dispatchChanged = newDispatch !== priorDispatch && newDispatch !== "";
+      if (dispatchChanged && !targetIsInactive && !statusTransitionAutoDispatch) {
         const { data: res } = await api.post("/numbering/dispatch/reserve",
                                              { value: Number(newDispatch), driver_id: d.id });
+        dispatchReservationId = res.reservation_id;
         patch.dispatch_number = res.dispatch_number;
-        // Consume via driver PUT below writes dispatch_number
       }
 
       if (Object.keys(patch).length) {
         await api.put(`/drivers/${d.id}`, patch);
       }
+
+      // MR-08A-FIX Defect 1 · Successful save must consume reservations.
+      if (codeReservationId) {
+        await api.post("/numbering/driver-code/consume",
+                       { reservation_id: codeReservationId, driver_id: d.id });
+        codeConsumed = true;
+      }
+      if (dispatchReservationId) {
+        await api.post("/numbering/dispatch/consume",
+                       { reservation_id: dispatchReservationId, driver_id: d.id });
+        dispatchConsumed = true;
+      }
+
       toast.success("Driver setup saved");
       setEditing(false);
       setCodeMode("keep");
       setCodeSuggestion(null);
       await onSaved?.();
     } catch (err) {
-      // Partial-failure: if we durably reserved a Driver Code but the PUT
-      // failed, release the reservation to avoid orphans.
-      if (reservationId) {
-        try { await api.post("/numbering/driver-code/release", { reservation_id: reservationId }); }
+      // Partial-failure release: for reservations that were opened but not
+      // yet consumed, release them so canonical state is clean.
+      if (codeReservationId && !codeConsumed) {
+        try { await api.post("/numbering/driver-code/release", { reservation_id: codeReservationId }); }
+        catch { /* best-effort */ }
+      }
+      if (dispatchReservationId && !dispatchConsumed) {
+        try { await api.post("/numbering/dispatch/release", { reservation_id: dispatchReservationId }); }
         catch { /* best-effort */ }
       }
       toast.error(formatApiErrorDetail(err?.response?.data?.detail) || err.message || "Save failed");
@@ -181,7 +212,8 @@ export default function DriverSetupCard({ data, role, onSaved }) {
             )}
           </div>
 
-          {/* Dispatch (manual active only) */}
+          {/* Dispatch (manual active only) — MR-08A-FIX Defect 4:
+              disabled when target status is Inactive; backend allocates 999-down. */}
           <div>
             <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500 mb-1">Dispatch #</div>
             <input
@@ -189,9 +221,20 @@ export default function DriverSetupCard({ data, role, onSaved }) {
               value={form.dispatch_number || ""}
               onChange={(e) => setForm({ ...form, dispatch_number: e.target.value.replace(/[^0-9]/g, "") })}
               placeholder="1–99 excl 13"
-              className="w-32 border border-slate-200 rounded-md px-2 py-1.5 text-sm font-mono"
+              disabled={form.driver_status === "Inactive"}
+              className="w-32 border border-slate-200 rounded-md px-2 py-1.5 text-sm font-mono disabled:bg-slate-50 disabled:text-slate-400"
             />
-            <div className="text-[10px] text-slate-500 mt-0.5">Inactive numbers are allocated automatically by status.</div>
+            {form.driver_status === "Inactive" ? (
+              <div data-testid="dispatch-inactive-hint" className="text-[10px] text-slate-500 mt-0.5">
+                Inactive Dispatch is allocated automatically.
+              </div>
+            ) : initial.current.driver_status === "Inactive" && form.driver_status === "Active" ? (
+              <div data-testid="dispatch-reactivate-hint" className="text-[10px] text-slate-500 mt-0.5">
+                Backend will restore your previous active number if free, or auto-allocate 1–99.
+              </div>
+            ) : (
+              <div className="text-[10px] text-slate-500 mt-0.5">Inactive numbers are allocated automatically by status.</div>
+            )}
           </div>
 
           <EditInput label="Start Date" type="date" value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} testid="edit-start-date" />

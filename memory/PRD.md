@@ -2312,3 +2312,44 @@ Status: **DONE · staging only · main/Production untouched**
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL & INTERACTION CONFORMANCE: PASS**
+
+---
+
+## MR-08A-FIX · Numbering Reservation + Status Transition Integrity (Feb 2026)
+
+Status: **DONE · staging only · main/Production untouched**
+
+### Defects fixed
+1. **Reservations not consumed** — `DriverSetupCard.jsx` now runs the full canonical lifecycle `reserve → PUT → consume` for both Driver Code AND active Dispatch. On success the reservation ends `Consumed` with an `Allocated` event; on Driver PUT or consume failure, the reservation is `Released` via canonical endpoints.
+2. **Status changing despite numbering failure** — `PUT /api/drivers/{id}` now:
+   - Computes the target Dispatch value FIRST (peek only — no allocation write)
+   - If the target status change requires numbering and no valid target can be computed, returns HTTP 409 BEFORE any status write
+   - Commits `driver_status` + `dispatch_number` atomically in one `$set`
+   - Logs the numbering event after the atomic write. The `try/except HTTPException` swallow is gone.
+3. **Wrong history sort field** — `_find_last_active_dispatch` now sorts by `performed_at` (was `created_at`); projection updated accordingly.
+4. **Manual active Dispatch + Inactive status** — the Dispatch input in `DriverSetupCard.jsx` is now `disabled` when target status is `Inactive` (hint `"Inactive Dispatch is allocated automatically."`), and the reactivate hint appears for `Inactive → Active`. A `statusTransitionAutoDispatch` guard prevents the frontend from creating an active reservation when the transition path is auto-driven.
+
+### Files changed
+- `backend/numbering_module.py` — `_find_last_active_dispatch` sorts by `performed_at`
+- `backend/registers.py` — status transition integrity in `PUT /api/drivers/{id}` (peek target → atomic write → event); returns 409 on numbering failure instead of swallowing
+- `frontend/src/components/driver-cc/DriverSetupCard.jsx` — full consume lifecycle for Driver Code + Dispatch, target-Inactive disables Dispatch input, transition-auto-dispatch guard prevents inactive-number reservations
+- `backend/tests/test_mr08a_fix_integrity.py` — new · **15/15 pass**
+
+### Test coverage
+- Reservation lifecycle · Driver Code + Dispatch reserve → PUT → consume marks `Consumed` and writes `Allocated` event
+- Release marks `Released`
+- Active→Inactive atomic: status + dispatch change together
+- Inactive allocation failure → 409, prior status + dispatch preserved
+- Active restore failure → 409, driver remains Inactive with inactive number
+- Reactivate happy path restores prior when free
+- `_find_last_active_dispatch` returns higher-`performed_at` even when `created_at` order is reversed
+- On Leave / Archived unchanged
+- MR-04B activation gate still hides Driver Code + Dispatch keys
+- Frontend source: `disabled={form.driver_status === "Inactive"}`, `statusTransitionAutoDispatch`, both consume + release calls present
+- Combined regression: MR-04B + MR-05 + MR-07A + MR-08A + MR-08A-FIX + legacy EB-08 = **126/126 green**
+
+### Confirmations
+staging only · main untouched · Production untouched · pools unchanged · reserved scope unchanged (0/13 = Dispatch only) · no swallowed numbering failure leaves invalid status · successful reservations consumed · failed-save reservations released · `performed_at` used for last-active history · no Activation changes · no Owner/Carrier changes · no role changes · no out-of-scope changes
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: PASS** (Dispatch input auto-disables under Inactive target; reactivate hint shown; consume runs invisibly)

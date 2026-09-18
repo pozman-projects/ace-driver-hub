@@ -2353,3 +2353,37 @@ staging only · main untouched · Production untouched · pools unchanged · res
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL & INTERACTION CONFORMANCE: PASS** (Dispatch input auto-disables under Inactive target; reactivate hint shown; consume runs invisibly)
+
+---
+
+## MR-08A-FIX2 · Post-Write Reservation Integrity (Feb 2026)
+
+Status: **DONE · staging only · main/Production untouched · backend unchanged**
+
+### Defect fixed
+The previous MR-08A-FIX release-on-error logic released any reservation whose local `consumed=false`. It could not tell the difference between:
+- **A** PUT failed before the Driver was mutated (safe to release), and
+- **B** PUT succeeded but a follow-up `consume` failed (release is WRONG — Driver already owns the number).
+
+In case B the reservation could end up `Released` while the Driver kept the value, and the canonical `Allocated` event from `consume` would be missing.
+
+### Change (frontend only, `DriverSetupCard.jsx`)
+- New `driverWriteSucceeded` flag flipped `true` immediately after a successful `PUT /drivers/{id}`.
+- Both `/numbering/driver-code/release` and `/numbering/dispatch/release` calls are now inside a single `if (!driverWriteSucceeded)` gate — only the pre-write failure path runs them.
+- Each consume is independently `try`/`catch`'d and rethrows; a failed consume never releases the sibling reservation nor rolls back the sibling's `Consumed` state.
+- Post-write consume failure path: no success toast; `onSaved?.()` still fires to refresh canonical DCC state; the reservation is left `Reserved` for reconciliation.
+
+### Files changed
+- `frontend/src/components/driver-cc/DriverSetupCard.jsx`
+- `backend/tests/test_mr08a_fix2_release_gate.py` — new · **9/9 pass**
+
+### Tests
+- Source guards: `driverWriteSucceeded` flag exists in both true/false forms; both release calls live INSIDE the `!driverWriteSucceeded` block and NOWHERE else; the success toast lives only inside the try; the catch calls `onSaved?.()`.
+- Backend lifecycle: reserve→PUT→consume marks `Consumed`; reserve→release marks `Released`; consumed-then-release simulation confirms the Driver still owns the number even if the DCC accidentally released (the fix ensures the DCC never does).
+- Regressions: status-transition atomic Active→Inactive still writes `driver_status=Inactive` + `dispatch_number ∈ [100,999]`; Blueprint V1 gate does not include Driver Code / Dispatch keys.
+- Combined regression: MR-04B + MR-05 + MR-07A + MR-08A + MR-08A-FIX + MR-08A-FIX2 + legacy EB-08 = **135/135 green**.
+
+### Confirmations
+staging only · main untouched · Production untouched · backend unchanged · pre-write failures release reservations · post-write consume failures do NOT release reservations · successful consumes remain `Consumed` · numbering pools unchanged · status-transition logic unchanged · no Activation changes · no Owner/Carrier changes · no permission changes · no out-of-scope changes
+
+**FUNCTIONAL CONFORMANCE: PASS**

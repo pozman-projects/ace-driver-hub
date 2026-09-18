@@ -74,7 +74,12 @@ export default function DriverSetupCard({ data, role, onSaved }) {
     setSaving(true);
     let codeReservationId = null;
     let dispatchReservationId = null;
-    // Track whether each reservation was actually consumed on the backend
+    // MR-08A-FIX2 · Track WHERE we are in the reserve → PUT → consume sequence.
+    // Only release reservations if the Driver PUT itself failed. Once the
+    // Driver record has been mutated, releasing would falsely mark an
+    // owned number as Released. In that case surface the error and refresh
+    // canonical state, but LEAVE the reservation intact for reconciliation.
+    let driverWriteSucceeded = false;
     let codeConsumed = false;
     let dispatchConsumed = false;
     try {
@@ -121,17 +126,29 @@ export default function DriverSetupCard({ data, role, onSaved }) {
       if (Object.keys(patch).length) {
         await api.put(`/drivers/${d.id}`, patch);
       }
+      driverWriteSucceeded = true;
 
       // MR-08A-FIX Defect 1 · Successful save must consume reservations.
+      // MR-08A-FIX2 · Each consume is independent; failure of one does NOT
+      // release any already-successful consume nor release the failing
+      // reservation (Driver already owns the number).
       if (codeReservationId) {
-        await api.post("/numbering/driver-code/consume",
-                       { reservation_id: codeReservationId, driver_id: d.id });
-        codeConsumed = true;
+        try {
+          await api.post("/numbering/driver-code/consume",
+                         { reservation_id: codeReservationId, driver_id: d.id });
+          codeConsumed = true;
+        } catch (consumeErr) {
+          throw consumeErr;
+        }
       }
       if (dispatchReservationId) {
-        await api.post("/numbering/dispatch/consume",
-                       { reservation_id: dispatchReservationId, driver_id: d.id });
-        dispatchConsumed = true;
+        try {
+          await api.post("/numbering/dispatch/consume",
+                         { reservation_id: dispatchReservationId, driver_id: d.id });
+          dispatchConsumed = true;
+        } catch (consumeErr) {
+          throw consumeErr;
+        }
       }
 
       toast.success("Driver setup saved");
@@ -140,16 +157,20 @@ export default function DriverSetupCard({ data, role, onSaved }) {
       setCodeSuggestion(null);
       await onSaved?.();
     } catch (err) {
-      // Partial-failure release: for reservations that were opened but not
-      // yet consumed, release them so canonical state is clean.
-      if (codeReservationId && !codeConsumed) {
-        try { await api.post("/numbering/driver-code/release", { reservation_id: codeReservationId }); }
-        catch { /* best-effort */ }
+      if (!driverWriteSucceeded) {
+        // Pre-write failure — safe to release any newly-created reservations.
+        if (codeReservationId && !codeConsumed) {
+          try { await api.post("/numbering/driver-code/release", { reservation_id: codeReservationId }); }
+          catch { /* best-effort */ }
+        }
+        if (dispatchReservationId && !dispatchConsumed) {
+          try { await api.post("/numbering/dispatch/release", { reservation_id: dispatchReservationId }); }
+          catch { /* best-effort */ }
+        }
       }
-      if (dispatchReservationId && !dispatchConsumed) {
-        try { await api.post("/numbering/dispatch/release", { reservation_id: dispatchReservationId }); }
-        catch { /* best-effort */ }
-      }
+      // MR-08A-FIX2 · If driverWriteSucceeded but a consume failed, DO NOT
+      // release — the Driver already owns the number. Surface the error and
+      // refresh canonical state so the UI stops showing stale values.
       toast.error(formatApiErrorDetail(err?.response?.data?.detail) || err.message || "Save failed");
       await onSaved?.();
     } finally { setSaving(false); }

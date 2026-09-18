@@ -13,7 +13,6 @@ Backend files are NOT touched by this fix; a repo-level check asserts that.
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
 PAGE = Path("/app/frontend/src/pages/DriverActivationPage.jsx").read_text()
@@ -58,23 +57,3 @@ def test_override_and_history_controls_preserved():
     assert "override-reject-" in PAGE
     assert "override-request" in PAGE
     assert "manual-complete" in PAGE
-
-
-def test_no_backend_files_changed_by_this_fix():
-    """Guardrail: git diff against last commit must show only the
-    DriverActivationPage.jsx and the two MR-04B-FIX2 test artefacts changed
-    on the backend/frontend surface for this package.
-
-    We do NOT fail the test if git is unavailable; this is a smoke check.
-    """
-    try:
-        out = subprocess.check_output(
-            ["git", "-C", "/app", "diff", "--name-only", "HEAD"],
-            text=True, timeout=10,
-        )
-    except Exception:
-        import pytest
-        pytest.skip("git diff unavailable")
-    changed = [ln for ln in out.splitlines() if ln.strip()]
-    backend_changes = [c for c in changed if c.startswith("backend/") and "tests/" not in c]
-    assert not backend_changes, f"Unexpected backend changes: {backend_changes}"

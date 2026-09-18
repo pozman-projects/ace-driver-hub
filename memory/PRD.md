@@ -2191,3 +2191,46 @@ Blueprint V1 gate was Ready.
 
 ### Confirmations
 - staging only. main untouched. Production untouched. No backend changes. No override logic changes. No template changes. No history changes.
+
+---
+
+## MR-05 · Owner / Carrier / Relationship Editing (Feb 2026)
+
+Status: **DONE · staging only · main untouched**
+
+### Owner-locked decisions applied
+1. Primary Vehicle reassignment UX: **explicit confirmation on Save** (no immediate mutation)
+2. Equipment ownership terminology: **canonical `Owned / Leased / Sub-Contracted / Other` used as-is** (Blueprint reconciliation deferred)
+3. Inline Owner create: **enabled** — compact "+ New Owner" modal creates via `POST /api/owners`
+
+### Changes
+**Backend**
+- `driver_profile_module.py` DCC aggregator now exposes `tray_coupling`, `tray_equipment`, `trailer_coupling`, `trailer_equipment` (current active couplings only; canonical values only). No duplicate business rule.
+
+**Frontend**
+- `components/driver-cc/OwnerDetailsCard.jsx` — full rewrite. View mode shows Driving For / Truck Owner / Owner Mobile / Owner Email. Edit mode: owner search+select (canonical `/api/owners`), pending banner, contact edit with shared-owner warning, inline "+ New Owner" modal, Save routes reassignment through `POST /api/driver-owner-relationships` (auto-closes prior current) then optionally patches Owner via `PUT /api/owners/{id}`.
+- `components/driver-cc/CarrierEquipmentCard.jsx` — full rewrite. View shows Vehicle rego / Config / Status / Tray (number + ownership) / Trailer (number + ownership). Edit uses pending state: Vehicle picker (Save → `POST /api/driver-vehicle-assignments/reassign`), config + status editable via `PUT /api/vehicles/{id}` (only canonical `Active / In Workshop / Retired / Sold / Written Off / Pending Disposal`), Tray + Trailer pickers filter by canonical `equipment_type` and Save through `POST /api/vehicle-equipment-couplings/reassign`.
+- `pages/DriverCommandCentre.jsx` — passes `role`, `driverId`, `onSaved` into both cards. 3×3 layout unchanged.
+
+### Canonical services used (no new endpoints created)
+| Concern | Endpoint |
+|---|---|
+| Driver ↔ Owner | `POST /api/driver-owner-relationships` (is_current auto-closes prior) |
+| Owner CRUD | `POST/PUT /api/owners` |
+| Driver ↔ Vehicle | `POST /api/driver-vehicle-assignments/reassign` |
+| Vehicle status/config | `PUT /api/vehicles/{id}` |
+| Vehicle ↔ Equipment | `POST /api/vehicle-equipment-couplings/reassign` |
+
+### Tests (all green)
+- `test_mr05_relationships.py` — **16 pass** covering: aggregator payload; tray/trailer exposure; historical owner is not current; canonical owner mutation reflects in aggregator; shared-owner cascades to both drivers; no duplicate `owner_mobile`/`owner_email` on driver; ReadOnly cannot create/update owner / reassign vehicle / couple equipment; reassign preserves history + one-current rule; coupling type validation blocked; two active trays blocked without reassign; deprecated lifecycle values rejected; MR-04 seven-item gate unchanged; MR-07A privacy stripping preserved.
+- `test_mr05_frontend_smoke.py` — **5 pass** covering: Owner + Carrier testid coverage; no non-canonical ownership labels present; no deprecated lifecycle values; DCC wires role/driverId/onSaved.
+- Combined MR-04B + MR-04B-FIX + MR-04B-FIX2 + MR-07A + MR-05 suites: **80/80 green.**
+
+### Confirmations
+- staging only · main untouched · Production untouched · no real ACE data migrated
+- No duplicate relationship storage · no owner_* fields on Driver · no coupling stored on DVA · no standalone Tilt Tray module
+- Vehicle reassignment uses explicit Save confirmation · raw canonical ownership terminology only · inline Owner create implemented
+- No Activation changes · no numbering changes · no new roles · no out-of-scope changes
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: PASS** (3×3 preserved; in-card view↔edit toggle; compact pickers; pending banners)

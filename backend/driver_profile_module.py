@@ -219,6 +219,28 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
     if dva and dva.get("vehicle_id"):
         vehicle = await db[VEHICLES_COLL].find_one({"id": dva["vehicle_id"]}, {"_id": 0})
 
+    # -- MR-05 · Current Vehicle ↔ Equipment couplings (Tray / Trailer) --------
+    tray_coupling = trailer_coupling = None
+    tray_equipment = trailer_equipment = None
+    if vehicle:
+        VEC_COLL = "vehicle_equipment_couplings"
+        tray_coupling = await db[VEC_COLL].find_one(
+            {"vehicle_id": vehicle["id"], "role": "Tray", "is_active": True, "is_archived": {"$ne": True}},
+            {"_id": 0},
+        )
+        trailer_coupling = await db[VEC_COLL].find_one(
+            {"vehicle_id": vehicle["id"], "role": "Trailer", "is_active": True, "is_archived": {"$ne": True}},
+            {"_id": 0},
+        )
+        if tray_coupling and tray_coupling.get("equipment_id"):
+            tray_equipment = await db[EQUIPMENT_COLL].find_one(
+                {"id": tray_coupling["equipment_id"]}, {"_id": 0}
+            )
+        if trailer_coupling and trailer_coupling.get("equipment_id"):
+            trailer_equipment = await db[EQUIPMENT_COLL].find_one(
+                {"id": trailer_coupling["equipment_id"]}, {"_id": 0}
+            )
+
     dea_docs = await db[DEA_COLL].find({"driver_id": driver_id, "is_active": True, "is_archived": {"$ne": True}}, {"_id": 0}).to_list(200)
     eq_ids = [a["equipment_id"] for a in dea_docs if a.get("equipment_id")]
     eq_by_id: Dict[str, dict] = {}
@@ -527,6 +549,10 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
         "owner_relationship": dor,
         "vehicle": vehicle,
         "vehicle_assignment": dva,
+        "tray_coupling": tray_coupling,
+        "tray_equipment": tray_equipment,
+        "trailer_coupling": trailer_coupling,
+        "trailer_equipment": trailer_equipment,
         "equipment_assignments": equipment_assignments,
         "communication_preferences": comms,
         "compliance_intelligence": compliance_intelligence,

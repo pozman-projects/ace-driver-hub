@@ -107,8 +107,8 @@ function CommandCentreInner({ driverId, sectionAnchor }) {
                 {/* Row 2 */}
                 <ManagementRow>
                   <CommunicationCard data={data} role={role} driverId={driverId} onSaved={refresh} />
-                  <CarrierEquipmentCard data={data} />
-                  <OwnerDetailsCard data={data} />
+                  <CarrierEquipmentCard data={data} role={role} driverId={driverId} onSaved={refresh} />
+                  <OwnerDetailsCard data={data} role={role} driverId={driverId} onSaved={refresh} />
                 </ManagementRow>
                 {/* Row 3 */}
                 <ManagementRow>

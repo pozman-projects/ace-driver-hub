@@ -390,10 +390,13 @@ class TestOverrides:
 class TestActivation:
     def test_cannot_activate_incomplete(self, manager_headers, driver_id):
         # Seed driver still has outstanding mandatories, should refuse.
+        # MR-04B-FIX: canonical Blueprint gate now returns 409 DRIVER_NOT_READY
+        # (business-rule conflict) rather than 400.
         r = requests.post(f"{API}/drivers/{driver_id}/activation/activate",
                            json={"reason": "test", "set_driver_status_active": True},
                            headers=manager_headers, timeout=15)
-        assert r.status_code == 400
+        assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "DRIVER_NOT_READY"
 
     def test_allocator_cannot_activate(self, allocator_headers, driver_id):
         r = requests.post(f"{API}/drivers/{driver_id}/activation/activate",

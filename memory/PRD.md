@@ -2096,3 +2096,68 @@ P0 direct-API bypass. Add minimum canonical data required by items 4/6/7.
   Registration blocker added. No duplicate expiry logic. No external
   Blink integration. No electronic signing. No second override system.
   No document architecture redesign. No numbering changes.
+
+---
+
+## MR-04B-FIX · Complete Single-Source Blueprint V1 Activation Cutover (Feb 2026)
+
+Status: **DONE · staging only · main untouched**
+
+### Purpose
+Remove the multiple competing readiness paths left over after MR-04B and make
+`blueprint_v1_readiness()` the ONE authority for normal (non-override) Driver
+activation, both via `PUT /api/drivers/{id}` and
+`POST /api/drivers/{id}/activation/activate`.
+
+### Six defects fixed
+1. **Dedicated Activate endpoint** — `POST /activation/activate` now calls
+   `blueprint_v1_readiness(db, driver_id)` and returns HTTP 409
+   `DRIVER_NOT_READY` when not Ready. The Driver Code blocker was removed;
+   Driver Code remains valid setup/numbering info but no longer gates V1.
+2. **DCC Activation card** (`ActivationChecklistCard.jsx`) — consumes
+   `GET /api/drivers/{id}/blueprint-readiness` (with the aggregator's
+   embedded canonical result as first paint). Renders ALL 7 items. Removed
+   `.slice(0,5)`. No frontend calculation.
+3. **Driver Profile aggregator** (`driver_profile_module.py`) —
+   `_compute_activation_summary()` is now a thin passthrough that delegates
+   to `blueprint_v1_readiness()`. All legacy mandatory logic (driver_code,
+   dispatch_number, owner_relationship, vehicle_assignment, contract-on-file,
+   driver contact details) removed as competing readiness authorities.
+4. **Default V1 template** (`DEFAULT_ITEMS` in `activation_module.py`) —
+   replaced with EXACT seven Blueprint V1 mandatory items. Historical
+   activation records are preserved untouched (seed is idempotent).
+5. **Duplicate expiry logic** — `blueprint_v1_readiness()` no longer calls
+   `ActivationService._resolve_automatic` for Licence/Insurance. Instead
+   reads canonical `_ComplianceService.driver_summary()` and
+   `vehicle_summary()`; maps status via existing `_VC_COMPONENT_MAP`
+   (Compliant/Conditions → pass, Non-Compliant → fail). No 30/7-day
+   parsing inside Activation.
+6. **Licence hidden evidence blocker** — the `evidence_document_id` check
+   was removed. Licence readiness = canonical Compliance result only.
+
+### Dedicated Activation page
+`DriverActivationPage.jsx` now displays a top **Blueprint V1 — Canonical
+Seven-Item Gate** section (double-bordered, testid `blueprint-v1-section`)
+that reads `/blueprint-readiness` and lists all seven items with per-item
+status. Existing history/override/full-checklist UI remains underneath.
+
+### Tests
+- **NEW** `backend/tests/test_mr04b_fix_surgical.py` — 14 targeted tests
+  across all six defects + preservation (MR-07A leak, ordinary edit,
+  non-Active transitions). **All 14 pass**.
+- Directly affected regression:
+  `test_mr04b_activation_gate.py` (18/18), `test_mr07a_permissions.py`
+  (23/23), `test_activation_eb10*.py` legacy suite (one status-code
+  assertion updated: 400 → 409 to match canonical business-rule response).
+  **55 activation-focused tests green.**
+
+### Confirmations
+- staging only. main untouched. Production untouched. No real ACE data
+  migrated.
+- Exactly seven mandatory V1 items. Driver Code is NOT a V1 blocker.
+- No registration blocker added. No duplicate expiry logic. No hidden
+  licence-evidence blocker. No new roles. No second override system.
+  No external Blink integration. No electronic signing. No numbering
+  policy changes. Override permissions/reason/history preserved.
+- MR-07A privacy preserved: readiness payload never leaks `business_name`
+  or `abn` values.

@@ -207,125 +207,44 @@ async def ensure_indexes(db):
     await db[EVT_COLL].create_index([("driver_activation_id", 1), ("performed_at", -1)])
 
 
-# ─── Default ACE template definition (fictional, dev-only) ───────────────────
+# ─── Default V1 Blueprint template definition ────────────────────────────────
+# MR-04B-FIX Defect 4 · The authoritative default V1 template contains EXACTLY
+# the seven Blueprint mandatory items. It is NOT the source of readiness — that
+# authority is `blueprint_v1_readiness()`. Historical activation records are
+# preserved untouched; only newly seeded default templates use this list.
 DEFAULT_ITEMS: List[Dict[str, Any]] = [
-    # Driver Identity ---------------------------------------------------------
-    dict(item_key="drv.full_name", label="Full Name",
-         category="Driver Identity", completion_type="Automatic",
-         source_entity_type="driver", source_field="full_name",
-         mandatory=True, evidence_required=False, override_allowed=False),
-    dict(item_key="drv.residential_address", label="Residential Address",
-         category="Driver Identity", completion_type="Automatic",
-         source_entity_type="driver", source_field="residential_address",
-         mandatory=True, override_allowed=False),
-    dict(item_key="drv.mobile", label="Mobile Number",
-         category="Driver Identity", completion_type="Automatic",
-         source_entity_type="driver", source_field="mobile_number",
-         mandatory=True, override_allowed=False),
-    dict(item_key="drv.email", label="Email Address",
-         category="Driver Identity", completion_type="Automatic",
-         source_entity_type="driver", source_field="email",
-         mandatory=True, override_allowed=False),
-    dict(item_key="drv.emergency_name", label="Emergency Contact Name",
-         category="Driver Identity", completion_type="Automatic",
-         source_entity_type="driver", source_field="emergency_contact_name",
-         mandatory=False, override_allowed=True, override_max_days=30),
-    dict(item_key="drv.emergency_phone", label="Emergency Contact Phone",
-         category="Driver Identity", completion_type="Automatic",
-         source_entity_type="driver", source_field="emergency_contact_phone",
-         mandatory=False, override_allowed=True, override_max_days=30),
-    dict(item_key="drv.profile_photo", label="Profile Photo",
-         category="Documents", completion_type="Automatic",
-         source_entity_type="document", source_field="Profile Photo",
-         mandatory=False, evidence_required=True, override_allowed=True, override_max_days=60),
-    # Account Setup ----------------------------------------------------------
-    dict(item_key="acc.business_name", label="Business Name (contractor)",
-         category="Account Setup", completion_type="Conditional Automatic",
-         source_entity_type="driver", source_field="business_name",
-         conditional=True, condition_rule={"driver_type_in": ["Contractor Driver", "Owner Driver"]},
-         mandatory=True, override_allowed=True, override_max_days=30),
-    dict(item_key="acc.abn", label="ABN (contractor)",
-         category="Account Setup", completion_type="Conditional Automatic",
-         source_entity_type="driver", source_field="abn",
-         conditional=True, condition_rule={"driver_type_in": ["Contractor Driver", "Owner Driver"]},
-         mandatory=True, override_allowed=True, override_max_days=30),
-    dict(item_key="acc.payroll_number", label="Payroll Number",
-         category="Account Setup", completion_type="Automatic",
-         source_entity_type="driver", source_field="payroll_number",
-         mandatory=False, override_allowed=True, override_max_days=30),
-    dict(item_key="acc.payment_percentage", label="Payment Percentage",
-         category="Account Setup", completion_type="Automatic",
-         source_entity_type="driver", source_field="payment_percentage",
-         mandatory=True, override_allowed=True, override_max_days=30),
-    # Driver Setup -----------------------------------------------------------
-    dict(item_key="setup.driver_code", label="Driver Code allocated",
-         category="Driver Setup", completion_type="Automatic",
-         source_entity_type="driver", source_field="driver_code",
-         mandatory=True, override_allowed=False),
-    dict(item_key="setup.dispatch_number", label="Dispatch Number allocated",
-         category="Driver Setup", completion_type="Automatic",
-         source_entity_type="driver", source_field="dispatch_number",
-         mandatory=True, override_allowed=False),
-    dict(item_key="setup.start_date", label="Start Date",
-         category="Driver Setup", completion_type="Automatic",
-         source_entity_type="driver", source_field="start_date",
+    dict(item_key="driver_licence", label="Driver Licence",
+         category="Licence and Compliance", completion_type="Automatic",
+         source_entity_type="licence", source_field="canonical_compliance",
          mandatory=True, override_allowed=True, override_max_days=14),
-    dict(item_key="setup.contract", label="Driver Contract on file",
+    dict(item_key="company_details", label="Company Details",
+         category="Account Setup", completion_type="Automatic",
+         source_entity_type="driver", source_field="business_name",
+         mandatory=True, override_allowed=True, override_max_days=30),
+    dict(item_key="abn", label="ABN",
+         category="Account Setup", completion_type="Automatic",
+         source_entity_type="driver", source_field="abn",
+         mandatory=True, override_allowed=True, override_max_days=30),
+    dict(item_key="business_registration_certificate",
+         label="Certificate of Business Registration",
+         category="Documents", completion_type="Automatic",
+         source_entity_type="document",
+         source_field="Certificate of Business Registration",
+         mandatory=True, evidence_required=True,
+         override_allowed=True, override_max_days=30),
+    dict(item_key="truck_insurance", label="Truck Insurance",
+         category="Licence and Compliance", completion_type="Automatic",
+         source_entity_type="vehicle_insurance", source_field="canonical_compliance",
+         mandatory=True, override_allowed=True, override_max_days=7),
+    dict(item_key="blink_driver_app", label="Blink Driver App",
+         category="System Access", completion_type="Automatic",
+         source_entity_type="driver", source_field="blink_driver_app_complete",
+         mandatory=True, override_allowed=True, override_max_days=30),
+    dict(item_key="driver_contract_signed", label="Driver Contract Signed",
          category="Documents", completion_type="Automatic",
          source_entity_type="document", source_field="Driver Contract",
-         mandatory=True, evidence_required=True, override_allowed=True, override_max_days=14),
-    # Communication & Assignment --------------------------------------------
-    dict(item_key="comm.preferences", label="Communication Preferences reviewed",
-         category="Communication", completion_type="Automatic",
-         source_entity_type="comms", source_field="exists",
-         mandatory=False, override_allowed=True, override_max_days=30),
-    dict(item_key="rel.owner", label="Current Owner relationship",
-         category="Owner Relationship", completion_type="Automatic",
-         source_entity_type="owner_relationship", source_field="exists",
-         mandatory=True, override_allowed=True, override_max_days=30),
-    dict(item_key="rel.vehicle", label="Current Primary Vehicle",
-         category="Vehicle Assignment", completion_type="Automatic",
-         source_entity_type="vehicle_assignment", source_field="exists",
-         mandatory=True, override_allowed=True, override_max_days=30),
-    # Compliance -------------------------------------------------------------
-    dict(item_key="cmp.licence_exists", label="Primary Driver Licence exists",
-         category="Licence and Compliance", completion_type="Automatic",
-         source_entity_type="licence", source_field="exists",
-         mandatory=True, override_allowed=False),
-    dict(item_key="cmp.licence_not_expired", label="Driver Licence is not Expired",
-         category="Licence and Compliance", completion_type="Automatic",
-         source_entity_type="licence", source_field="not_expired",
-         mandatory=True, override_allowed=False),
-    dict(item_key="cmp.licence_evidence", label="Licence Evidence attached",
-         category="Documents", completion_type="Automatic",
-         source_entity_type="document", source_field="Driver Licence",
-         mandatory=True, evidence_required=True, override_allowed=True, override_max_days=14),
-    dict(item_key="cmp.vehicle_rego", label="Vehicle Registration is current",
-         category="Licence and Compliance", completion_type="Automatic",
-         source_entity_type="vehicle_registration", source_field="current",
-         mandatory=True, override_allowed=True, override_max_days=7),
-    dict(item_key="cmp.vehicle_insurance", label="Vehicle Insurance is current",
-         category="Licence and Compliance", completion_type="Automatic",
-         source_entity_type="vehicle_insurance", source_field="current",
-         mandatory=True, override_allowed=True, override_max_days=7),
-    dict(item_key="cmp.no_critical_defect", label="No unresolved Critical Vehicle defect",
-         category="Licence and Compliance", completion_type="Automatic",
-         source_entity_type="vehicle_defect", source_field="none_critical",
-         mandatory=True, override_allowed=False),  # non-overridable blocker
-    dict(item_key="cmp.no_overdue_maintenance", label="No Overdue Vehicle maintenance",
-         category="Licence and Compliance", completion_type="Automatic",
-         source_entity_type="vehicle_maintenance", source_field="none_overdue",
-         mandatory=True, override_allowed=True, override_max_days=7),
-    # Training / manual ------------------------------------------------------
-    dict(item_key="trn.induction", label="Induction completed",
-         category="Training", completion_type="Manual",
-         mandatory=True, override_allowed=True, override_max_days=14),
-    dict(item_key="trn.safety_briefing", label="Safety briefing completed",
-         category="Training", completion_type="Manual",
-         mandatory=True, override_allowed=True, override_max_days=14),
-    dict(item_key="sys.dispatch_login", label="Dispatch system login issued",
-         category="System Access", completion_type="Manual",
-         mandatory=False, override_allowed=True, override_max_days=30),
+         mandatory=True, evidence_required=True,
+         override_allowed=True, override_max_days=14),
 ]
 
 
@@ -430,7 +349,10 @@ async def blueprint_v1_readiness(db, driver_id: str) -> Dict[str, Any]:
     if not driver:
         return {"readiness": "Not Ready", "items": [], "missing": [], "error": "driver_not_found"}
 
-    svc = ActivationService(db)  # reuses canonical compliance dispatch
+    # MR-04B-FIX Defect 5 · Canonical Compliance is the SOLE source for
+    # Licence and Insurance readiness. Activation must not parse expiries.
+    from compliance_records import _ComplianceService as ComplianceService, _VC_COMPONENT_MAP
+    compliance = ComplianceService(db)
     items: List[Dict[str, Any]] = []
 
     def _add(key, complete, status, reason, source_id=None):
@@ -444,24 +366,27 @@ async def blueprint_v1_readiness(db, driver_id: str) -> Dict[str, Any]:
             "source_id": source_id,
         })
 
-    # 1. Driver Licence — composite: exists AND not_expired AND canonical evidence
-    lic_exists = await svc._resolve_automatic({"source_entity_type": "licence", "source_field": "exists"}, driver)
-    lic_not_expired = await svc._resolve_automatic({"source_entity_type": "licence", "source_field": "not_expired"}, driver)
-    # Canonical evidence pointer (set by EVIDENCE_HOLDERS on upload)
-    lic_row = await db[LICENCES_COLL].find_one(
-        {"driver_id": driver_id, "is_primary": True, "is_archived": {"$ne": True}},
-        {"_id": 0, "evidence_document_id": 1, "id": 1},
-        sort=[("created_at", -1)],
-    )
-    lic_evidence_ok = bool(lic_row and lic_row.get("evidence_document_id"))
-    if lic_exists[0] == "Complete" and lic_not_expired[0] == "Complete" and lic_evidence_ok:
-        _add("driver_licence", True, "Complete", "Canonical primary licence current with evidence")
-    elif lic_exists[0] != "Complete":
-        _add("driver_licence", False, lic_exists[0], lic_exists[1])
-    elif lic_not_expired[0] != "Complete":
-        _add("driver_licence", False, lic_not_expired[0], lic_not_expired[1])
+    def _compliance_pass(component_status: Optional[str]) -> bool:
+        """Blueprint canonical semantics: Compliant + Conditions pass.
+        Non-Compliant fails. Missing/Not Applicable fails for a mandatory
+        V1 item that must exist. Uses canonical _VC_COMPONENT_MAP only."""
+        return _VC_COMPONENT_MAP.get(component_status or "", "Non-Compliant") in ("Compliant", "Conditions")
+
+    # 1. Driver Licence — canonical Compliance ONLY (Defect 5 + 6).
+    # No local expiry parsing. No evidence_document_id hidden gate.
+    try:
+        drv_summary = await compliance.driver_summary(driver_id)
+        lic_comp = next((c for c in drv_summary.get("components", []) if c.get("component") == "primary_licence"), None)
+    except HTTPException:
+        lic_comp = None
+    if not lic_comp or lic_comp.get("status") == "Missing":
+        _add("driver_licence", False, "Missing", "No canonical primary Driver Licence on file")
+    elif _compliance_pass(lic_comp.get("status")):
+        _add("driver_licence", True, "Complete",
+             f"Canonical compliance: {lic_comp.get('status')}", lic_comp.get("record_id"))
     else:
-        _add("driver_licence", False, "Missing", "No canonical licence evidence attached")
+        _add("driver_licence", False, lic_comp.get("status") or "Incomplete",
+             f"Canonical compliance: {lic_comp.get('status')}", lic_comp.get("record_id"))
 
     # 2. Company Details — Driver.business_name non-empty
     bn = (driver.get("business_name") or "").strip()
@@ -499,11 +424,28 @@ async def blueprint_v1_readiness(db, driver_id: str) -> Dict[str, Any]:
         _add("business_registration_certificate", False, "Missing",
              "No current Certificate of Business Registration linked to driver")
 
-    # 5. Truck Insurance — canonical compliance
-    ins = await svc._resolve_automatic(
-        {"source_entity_type": "vehicle_insurance", "source_field": "current"}, driver
+    # 5. Truck Insurance — canonical Compliance ONLY (Defect 5).
+    # Find primary vehicle assignment, then ask canonical vehicle_summary.
+    dva = await db[DVA_COLL].find_one(
+        {"driver_id": driver_id, "is_active": True, "is_primary": True, "is_archived": {"$ne": True}},
+        {"_id": 0, "vehicle_id": 1},
     )
-    _add("truck_insurance", ins[0] == "Complete", ins[0], ins[1])
+    if not dva or not dva.get("vehicle_id"):
+        _add("truck_insurance", False, "Missing", "No primary vehicle assignment for insurance check")
+    else:
+        try:
+            v_summary = await compliance.vehicle_summary(dva["vehicle_id"])
+            ins_comp = next((c for c in v_summary.get("components", []) if c.get("component") == "insurance"), None)
+        except HTTPException:
+            ins_comp = None
+        if not ins_comp or ins_comp.get("status") == "Missing":
+            _add("truck_insurance", False, "Missing", "No current Truck Insurance policy")
+        elif _compliance_pass(ins_comp.get("status")):
+            _add("truck_insurance", True, "Complete",
+                 f"Canonical compliance: {ins_comp.get('status')}", ins_comp.get("record_id"))
+        else:
+            _add("truck_insurance", False, ins_comp.get("status") or "Incomplete",
+                 f"Canonical compliance: {ins_comp.get('status')}", ins_comp.get("record_id"))
 
     # 6. Blink Driver App — canonical Driver scalar; legacy default False
     blink = bool(driver.get("blink_driver_app_complete"))
@@ -1375,12 +1317,24 @@ def build_activation_router(db, get_current_user):
             raise HTTPException(status_code=404, detail="Driver not found")
         if drv.get("is_archived"):
             raise HTTPException(status_code=400, detail="Archived driver cannot be activated")
-        full = await svc.recalculate(driver_id, current["email"])
-        rec = full["record"]
-        if rec["readiness_status"] not in ("Ready", "Ready with Override", "Activated"):
-            raise HTTPException(status_code=400, detail=f"Driver not ready: {rec['readiness_status']}")
-        if not drv.get("driver_code"):
-            raise HTTPException(status_code=400, detail="Driver Code missing — cannot activate")
+        # MR-04B-FIX Defect 1 · Canonical Blueprint V1 gate is the ONE source
+        # of truth for normal (non-override) activation. Driver Code is NOT a
+        # V1 blocker. Overrides remain a separate audited path.
+        readiness = await blueprint_v1_readiness(db, driver_id)
+        if readiness["readiness"] != "Ready":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DRIVER_NOT_READY",
+                    "readiness": readiness["readiness"],
+                    "missing": [
+                        {"key": i["key"], "label": i["label"], "status": i["status"]}
+                        for i in readiness["items"] if not i["complete"]
+                    ],
+                },
+            )
+        # Ensure activation record exists and reflect the state
+        rec, _ = await svc.get_or_start(driver_id, current["email"])
         now = _iso()
         await db[REC_COLL].update_one(
             {"driver_activation_id": rec["driver_activation_id"]},
@@ -1394,7 +1348,7 @@ def build_activation_router(db, get_current_user):
                 {"$set": {"driver_status": "Active", "updated_at": now}},
             )
         await svc._event(rec["driver_activation_id"], driver_id, "Driver Activated",
-                          rec["readiness_status"], "Activated", current["email"], payload.reason)
+                          rec.get("readiness_status"), "Activated", current["email"], payload.reason)
         await _emit_notification(db, "activation.activated", driver_id, rec["driver_activation_id"], "Driver activated")
         return await svc.get_full(driver_id)
 

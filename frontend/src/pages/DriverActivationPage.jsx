@@ -26,6 +26,7 @@ export default function DriverActivationPage() {
 
   const [data, setData] = useState(null);
   const [driver, setDriver] = useState(null);
+  const [blueprint, setBlueprint] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("All");
@@ -34,12 +35,14 @@ export default function DriverActivationPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [{ data: act }, { data: drv }] = await Promise.all([
+      const [{ data: act }, { data: drv }, { data: bp }] = await Promise.all([
         api.get(`/drivers/${driverId}/activation`),
         api.get(`/drivers/${driverId}`),
+        api.get(`/drivers/${driverId}/blueprint-readiness`),
       ]);
       setData(act);
       setDriver(drv);
+      setBlueprint(bp);
     } catch (e) {
       toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Load failed");
     } finally { setLoading(false); }
@@ -242,6 +245,38 @@ export default function DriverActivationPage() {
               </button>
             )}
           </div>
+        </section>
+
+        {/* MR-04B-FIX · Blueprint V1 canonical readiness — authoritative source */}
+        <section className="mb-6 bg-white border-2 border-slate-900 rounded-xl p-5" data-testid="blueprint-v1-section">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Authoritative Readiness</div>
+              <h2 className="text-lg font-semibold text-slate-900">Blueprint V1 — Canonical Seven-Item Gate</h2>
+            </div>
+            <StatusPill status={blueprint?.readiness || "Not Assessed"} testid="blueprint-v1-readiness" />
+          </div>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2" data-testid="blueprint-v1-items">
+            {(blueprint?.items || []).map((it) => (
+              <li key={it.key} data-testid={`blueprint-v1-item-${it.key}`}
+                  className={`flex items-start gap-2 rounded border px-3 py-2 ${it.complete ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
+                {it.complete ? (
+                  <CheckCircle size={16} weight="fill" className="text-emerald-600 mt-0.5 shrink-0" />
+                ) : (
+                  <Warning size={16} weight="fill" className="text-red-600 mt-0.5 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-900">{it.label}</div>
+                  <div className="text-[11px] text-slate-600">{it.status} · {it.reason}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {(!blueprint || (blueprint.items || []).length === 0) && (
+            <div className="text-sm text-slate-500" data-testid="blueprint-v1-empty">
+              Blueprint readiness unavailable.
+            </div>
+          )}
         </section>
 
         {/* Pending override queue */}

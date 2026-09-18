@@ -515,10 +515,9 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
     ).sort([("is_pinned", -1), ("updated_at", -1)]).to_list(100)
     notes = [n for n in notes_raw if _visible_note(role, n.get("note_type", "General"))]
 
-    # -- Activation summary (adapter) ------------------------------------------
-    activation = await _compute_activation_summary(
-        db, driver_raw, primary_licence, dor, dva, driver_contract, comms,
-    )
+    # -- Activation summary (adapter, delegates to canonical Blueprint V1) -----
+    from activation_module import blueprint_v1_readiness as _bp_readiness
+    activation = await _bp_readiness(db, driver_id)
 
     return {
         "driver": driver,
@@ -561,91 +560,16 @@ async def _compute_activation_summary(
     db, driver: dict, primary_licence: Optional[dict], dor: Optional[dict],
     dva: Optional[dict], contract: Optional[dict], comms: Optional[dict],
 ) -> Dict[str, Any]:
-    """Truthful activation adapter. Legacy onboarding checkbox alone is NOT enough
-    to mark an item complete — evidence must exist in the canonical source.
+    """MR-04B-FIX Defect 3 · This adapter no longer decides readiness.
+    Blueprint V1 canonical readiness is the ONE source of truth. This function
+    is preserved only as a thin passthrough for callers that used to depend on
+    its shape; it now returns the canonical seven-item Blueprint V1 result.
+
+    Old parameters (primary_licence/dor/dva/contract/comms) are ignored — the
+    canonical engine reads them directly from the source-of-truth collections.
     """
-    driver_id = driver["id"]
-    onboarding = await db[ONBOARDING_COLL].find_one({"driver_id": driver_id}, {"_id": 0})
-
-    items: List[Dict[str, Any]] = []
-
-    def _item(key, label, complete, mandatory, source, reason=None):
-        items.append({
-            "item_key": key,
-            "label": label,
-            "complete": bool(complete),
-            "mandatory": bool(mandatory),
-            "source": source,
-            "reason": reason or ("Complete" if complete else "Missing"),
-        })
-
-    # Mandatory items
-    _item("driver_details", "Driver contact details on file",
-          bool(driver.get("mobile_number") and driver.get("email")),
-          True, "canonical:drivers",
-          "Mobile & email required")
-    _item("driver_code", "Driver Code allocated",
-          bool(driver.get("driver_code")),
-          True, "canonical:drivers/EB-08",
-          "Automatic or manual allocation via EB-08")
-    _item("dispatch_number", "Dispatch Number allocated",
-          bool(driver.get("dispatch_number")),
-          True, "canonical:drivers/EB-08")
-    _item("primary_licence", "Primary Driver Licence recorded",
-          bool(primary_licence),
-          True, "canonical:driver_licences")
-    _item("owner_relationship", "Current Owner assigned",
-          bool(dor),
-          True, "canonical:driver_owner_relationships")
-    _item("vehicle_assignment", "Primary Vehicle assignment",
-          bool(dva),
-          True, "canonical:driver_vehicle_assignments")
-    _item("driver_contract", "Driver Contract on file",
-          bool(contract),
-          True, "canonical:documents (Driver Contract)")
-
-    # Automatic/environmental items
-    _item("communication_preferences", "Communication preferences set",
-          bool(comms),
-          False, "canonical:driver_communication_preferences")
-    _item("onboarding_record", "Onboarding record present",
-          bool(onboarding),
-          False, "legacy:onboarding")
-
-    # Legacy onboarding checklist honour: only mark COMPLETE_SUPPORT if evidence
-    if onboarding and onboarding.get("legacy_activation_ready") is True:
-        # Cross-validate: legacy claim + no primary licence => flag as unverified
-        source_ok = bool(primary_licence and driver.get("driver_code") and dor and dva)
-        _item("legacy_activation_ready", "Legacy activation flag",
-              source_ok, False,
-              "legacy:onboarding + canonical cross-check",
-              "Legacy flag confirmed by source records" if source_ok
-              else "Legacy flag claims ready but source records are missing — flagged")
-
-    mandatory_missing = [i for i in items if i["mandatory"] and not i["complete"]]
-    mandatory_total = sum(1 for i in items if i["mandatory"])
-    mandatory_done = mandatory_total - len(mandatory_missing)
-    completed_all = sum(1 for i in items if i["complete"])
-
-    if mandatory_missing:
-        readiness = "Not Ready"
-    elif mandatory_total == mandatory_done:
-        readiness = "Ready"
-    else:
-        readiness = "Partial"
-
-    override = onboarding.get("activation_override") if onboarding else None
-
-    return {
-        "readiness": readiness,
-        "mandatory_total": mandatory_total,
-        "mandatory_done": mandatory_done,
-        "total_items": len(items),
-        "completed_items": completed_all,
-        "mandatory_missing_items": mandatory_missing,
-        "override": override,
-        "items": items,
-    }
+    from activation_module import blueprint_v1_readiness as _bp_readiness
+    return await _bp_readiness(db, driver["id"])
 
 
 # ─── Router builder ───────────────────────────────────────────────────────────

@@ -2161,3 +2161,33 @@ status. Existing history/override/full-checklist UI remains underneath.
   policy changes. Override permissions/reason/history preserved.
 - MR-07A privacy preserved: readiness payload never leaks `business_name`
   or `abn` values.
+
+---
+
+## MR-04B-FIX2 · Final Activation Page Authority Cutover (Feb 2026)
+
+Status: **DONE · staging only · main untouched**
+
+### Defect fixed
+`DriverActivationPage.jsx`'s normal Activate Driver button was still gated by
+the legacy `rec.readiness_status` (`Ready` / `Ready with Override`), and the
+confirmation dialog also displayed that legacy value. This meant the legacy
+checklist could still block normal activation even when the authoritative
+Blueprint V1 gate was Ready.
+
+### Change (frontend only)
+- Button `disabled` now uses ONLY `blueprint?.readiness !== "Ready"`.
+- Confirmation dialog copy updated to `Blueprint V1 readiness: <Ready/Not Ready>` sourced from `blueprint?.readiness`. Legacy override count text removed from the dialog.
+- Legacy readiness pill / full checklist / override & history UI preserved.
+- No backend changes.
+
+### Files changed
+- `frontend/src/pages/DriverActivationPage.jsx` (button gate + confirm dialog)
+- `backend/tests/test_mr04b_fix2_page_gate.py` — **new** 5 targeted tests
+
+### Test results
+- `test_mr04b_fix2_page_gate.py`: **5/5 pass** (button uses only Blueprint readiness · dialog sources Blueprint · Blueprint V1 section preserved · overrides/history preserved · guardrail asserts no backend files changed)
+- Combined MR-04B-FIX2 + MR-04B-FIX + MR-04B gate suites: **33/33 green**
+
+### Confirmations
+- staging only. main untouched. Production untouched. No backend changes. No override logic changes. No template changes. No history changes.

@@ -96,7 +96,9 @@ export default function DriverActivationPage() {
     } finally { setBusy(false); }
   };
   const activate = async () => {
-    if (!window.confirm(`Activate driver?\n\nReadiness: ${readiness}\nOverrides active: ${rec?.override_count || 0}\nOutstanding optional items may remain.\n\nThis sets Driver Status to Active.`)) return;
+    // MR-04B-FIX2 · Normal Activate uses ONLY canonical Blueprint V1 readiness.
+    const bpReady = blueprint?.readiness || "Not Assessed";
+    if (!window.confirm(`Activate driver?\n\nBlueprint V1 readiness: ${bpReady}\n\nThis sets Driver Status to Active.`)) return;
     setBusy(true);
     try {
       await api.post(`/drivers/${driverId}/activation/activate`, { reason: "Activated from checklist page", set_driver_status_active: true });
@@ -229,7 +231,7 @@ export default function DriverActivationPage() {
               <ArrowsClockwise size={13} /> Recalculate
             </button>
             {canActivate && !activated && !deactivated && (
-              <button onClick={activate} disabled={busy || !["Ready", "Ready with Override"].includes(readiness)} data-testid="activation-activate-btn"
+              <button onClick={activate} disabled={busy || blueprint?.readiness !== "Ready"} data-testid="activation-activate-btn"
                 className="text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center gap-1 disabled:opacity-40">
                 <ShieldCheck size={13} weight="bold" /> Activate Driver
               </button>

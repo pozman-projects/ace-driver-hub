@@ -2437,3 +2437,45 @@ staging only · main untouched · Production untouched · no real ACE data migra
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL & INTERACTION CONFORMANCE: NOT CHANGED** (frontend surfaces untouched; auto-resolution runs backend-side)
+
+---
+## MR-06-FIX · Urgent Compliance Alert Lifecycle (feb-2026)
+
+### Scope
+Surgical addition of the `Urgent` (0–7d) tier to the notification lifecycle. Canonical status
+authority (`_classify_expiry`) unchanged. No new severity vocabulary. No live delivery enabled.
+
+### Owner-locked decisions
+- **Notification severity for Compliance Urgent = `High`** (reuses existing vocabulary).
+- **`repeat_interval_hours = 24`**, **`escalation_policy.levels = []`** (no ladder).
+
+### Files changed
+- `backend/notifications_module.py`
+  - `EventType.ComplianceUrgent = "Compliance Urgent"` added.
+  - Template `compliance_urgent` added (reuses Due Soon payload shape).
+  - Seed rule `Compliance · Urgent (7d)`: severity=High, repeat=24h, levels=[], template=compliance_urgent, channels=[InApp, Email (simulated)].
+  - `_compliance_scan_impl` now emits `ComplianceUrgent` when `_classify_expiry() == Urgent` for Licence / Registration / Insurance. Due Soon and Expired paths untouched.
+  - `_auto_resolve_compliance_alerts` extended:
+    - `compliance_event_types` now includes `ComplianceUrgent`.
+    - `ComplianceDueSoon` resolves when canonical is `Compliant / UnderReview / Urgent / Expired`.
+    - `ComplianceUrgent` resolves when canonical is `Compliant / DueSoon / Expired / UnderReview`.
+    - Expired / Missing behaviour preserved. Legacy `notification_events.event_type` fallback preserved.
+- `backend/tests/test_mr06_fix_urgent.py` — new, **10/10 pass**:
+  1. Urgent rule shape (severity=High, repeat=24h, levels=[]).
+  2. Licence full lifecycle: DueSoon → Urgent → DueSoon → Urgent → Expired → Urgent → Current (all transitions verified, history retained, idempotent under repeated scans).
+  3. Registration Urgent single active + idempotency.
+  4. Insurance Urgent single active.
+  5. Legacy fallback: notification row with missing `event_type` still resolvable via `notification_events`.
+  6. Ack on Urgent notification does not mutate canonical.
+  7. Delivery safety — no live provider, all non-InApp deliveries `Simulated` or transient states.
+  8. MR-04 activation readiness endpoint untouched.
+  9. MR-08A numbering surface untouched.
+  10. MR-05 owners surface untouched.
+
+### Regression
+- `tests/test_mr06_notifications.py` — **7/7 still pass** (base MR-06 lifecycle unaffected).
+
+### Confirmations
+staging only · main untouched · Production untouched · canonical thresholds unchanged · `_classify_expiry` reused · Compliance Urgent event added · Urgent severity=High · Urgent repeat=24h · Urgent escalation levels=[] · Due Soon resolves on Urgent · Urgent resolves when source leaves Urgent · history preserved · no live scheduler / Email / SMS enabled · no Activation changes · no numbering changes · no Owner/Carrier changes · no role changes · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**

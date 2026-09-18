@@ -60,6 +60,7 @@ SEED_TAG = "seed-eb07"
 # ---------------------------------------------------------------- controlled vocabularies
 class EventType(str, Enum):
     ComplianceDueSoon = "Compliance Due Soon"
+    ComplianceUrgent = "Compliance Urgent"
     ComplianceExpired = "Compliance Expired"
     ComplianceMissing = "Compliance Missing"
     ComplianceUnderReview = "Compliance Under Review"
@@ -252,6 +253,13 @@ TEMPLATES: Dict[str, Dict[str, str]] = {
         "email_body": "The {component} for {entity_label} expires on {expiry_date} ({days_until} days remaining). Please action or renew.",
         "sms_body": "DCC: {component} for {entity_label} due {expiry_date}.",
     },
+    "compliance_urgent": {
+        "title": "{entity_label} · {component} URGENT ({days_until}d)",
+        "message": "{component} for {entity_label} is URGENT — expires on {expiry_date} in {days_until} days.",
+        "email_subject": "[DCC] {component} URGENT — {entity_label}",
+        "email_body": "The {component} for {entity_label} is URGENT: expires on {expiry_date} in {days_until} days. Immediate action required to prevent expiry.",
+        "sms_body": "DCC: {component} URGENT for {entity_label} — {expiry_date}.",
+    },
     "compliance_expired": {
         "title": "{entity_label} · {component} EXPIRED",
         "message": "{component} for {entity_label} expired on {expiry_date} ({days_expired} days ago).",
@@ -387,6 +395,26 @@ DEFAULT_RULES: List[Dict[str, Any]] = [
         "template_key": "compliance_due_soon",
         "is_active": True,
         "priority": 100,
+    },
+    {
+        # MR-06-FIX · Owner-locked. Severity=High, repeat=24h, escalation=[].
+        # Canonical status source is _classify_expiry(); this rule presents
+        # the Urgent tier as its own notification event so lifecycle can
+        # dedupe & auto-resolve independently of Due Soon / Expired.
+        "name": "Compliance · Urgent (7d)",
+        "description": "High-priority alert when a compliance record is within the urgent window.",
+        "event_type": EventType.ComplianceUrgent.value,
+        "entity_type": None,
+        "conditions": {},
+        "severity": Severity.High.value,
+        "channels": [Channel.InApp.value, Channel.Email.value],
+        "recipient_strategy": RecipientStrategy.AllCompliance.value,
+        "warning_days": 7,
+        "repeat_interval_hours": 24,
+        "escalation_policy": {"levels": []},
+        "template_key": "compliance_urgent",
+        "is_active": True,
+        "priority": 92,
     },
     {
         "name": "Compliance · Expired",
@@ -1051,6 +1079,12 @@ class NotificationsEngine:
                     payload["days_until"] = max(0, (d.date() - datetime.now(timezone.utc).date()).days)
                 await emit(EventType.ComplianceDueSoon.value, EntityType.Driver.value,
                            lic.get("driver_id"), lic["id"], payload, source_status=status)
+            elif status == ComplianceStatus.Urgent.value:
+                d = _parse_date(lic.get("expiry_date"))
+                if d:
+                    payload["days_until"] = max(0, (d.date() - datetime.now(timezone.utc).date()).days)
+                await emit(EventType.ComplianceUrgent.value, EntityType.Driver.value,
+                           lic.get("driver_id"), lic["id"], payload, source_status=status)
             elif status == ComplianceStatus.Expired.value:
                 d = _parse_date(lic.get("expiry_date"))
                 if d:
@@ -1089,6 +1123,12 @@ class NotificationsEngine:
                     payload["days_until"] = max(0, (d.date() - datetime.now(timezone.utc).date()).days)
                 await emit(EventType.ComplianceDueSoon.value, EntityType.Vehicle.value,
                            r.get("vehicle_id"), r["id"], payload, source_status=status)
+            elif status == ComplianceStatus.Urgent.value:
+                d = _parse_date(r.get("expiry_date"))
+                if d:
+                    payload["days_until"] = max(0, (d.date() - datetime.now(timezone.utc).date()).days)
+                await emit(EventType.ComplianceUrgent.value, EntityType.Vehicle.value,
+                           r.get("vehicle_id"), r["id"], payload, source_status=status)
             elif status == ComplianceStatus.Expired.value:
                 d = _parse_date(r.get("expiry_date"))
                 if d:
@@ -1111,6 +1151,12 @@ class NotificationsEngine:
                        "expiry_date": p.get("expiry_date")}
             if status == ComplianceStatus.DueSoon.value:
                 await emit(EventType.ComplianceDueSoon.value, EntityType.Vehicle.value,
+                           p.get("vehicle_id"), p["id"], payload, source_status=status)
+            elif status == ComplianceStatus.Urgent.value:
+                d = _parse_date(p.get("expiry_date"))
+                if d:
+                    payload["days_until"] = max(0, (d.date() - datetime.now(timezone.utc).date()).days)
+                await emit(EventType.ComplianceUrgent.value, EntityType.Vehicle.value,
                            p.get("vehicle_id"), p["id"], payload, source_status=status)
             elif status == ComplianceStatus.Expired.value:
                 await emit(EventType.ComplianceExpired.value, EntityType.Vehicle.value,
@@ -1175,6 +1221,7 @@ class NotificationsEngine:
                         NotificationStatus.Acknowledged.value]
         compliance_event_types = [
             EventType.ComplianceDueSoon.value,
+            EventType.ComplianceUrgent.value,
             EventType.ComplianceExpired.value,
             EventType.ComplianceMissing.value,
         ]
@@ -1226,11 +1273,21 @@ class NotificationsEngine:
                     # Underlying record archived or removed → the alert is stale.
                     reason = f"Source record no longer active"
                 elif ev == EventType.ComplianceDueSoon.value:
-                    # Resolve DueSoon when canonical is Compliant OR now Expired
-                    # (Expired path emits its own alert; the old DueSoon is stale).
+                    # MR-06-FIX · Due Soon becomes stale when canonical is
+                    # Compliant, Under Review, Urgent, or Expired. Urgent
+                    # emits its own alert; Expired path emits its own alert.
                     if current in (ComplianceStatus.Compliant.value,
                                     ComplianceStatus.UnderReview.value,
+                                    ComplianceStatus.Urgent.value,
                                     ComplianceStatus.Expired.value):
+                        reason = f"Canonical status is now {current}"
+                elif ev == EventType.ComplianceUrgent.value:
+                    # MR-06-FIX · Urgent becomes stale when canonical source
+                    # leaves the Urgent tier in either direction.
+                    if current in (ComplianceStatus.Compliant.value,
+                                    ComplianceStatus.DueSoon.value,
+                                    ComplianceStatus.Expired.value,
+                                    ComplianceStatus.UnderReview.value):
                         reason = f"Canonical status is now {current}"
                 elif ev == EventType.ComplianceExpired.value:
                     # Resolve Expired when the source is renewed and canonical

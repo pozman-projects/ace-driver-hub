@@ -132,6 +132,8 @@ class DocumentType(str, Enum):
     # store; these are canonical DocumentType members exactly like the rest.
     StartingDocument = "Starting Document"
     TruckPhoto = "Truck Photo"
+    # MR-04B · Blueprint V1 activation item #4. Smallest taxonomy addition.
+    CertificateOfBusinessRegistration = "Certificate of Business Registration"
     SupportingDocument = "Supporting Document"
     Other = "Other"
 
@@ -1051,5 +1053,33 @@ def build_documents_router(db, get_current_user):
         return await db[DOCUMENT_ACCESS_EVENTS_COLL].find(
             {"document_id": document_id}, {"_id": 0}
         ).sort("timestamp", -1).to_list(1000)
+
+    # MR-04B · Canonical signature-state edit for Driver Contracts.
+    # Blueprint V1 item #7 requires an explicit Signed/Not Signed metadata
+    # value — never inferred from presence. Only Admin/Manager may set it.
+    @router.patch("/documents/{document_id}/signature")
+    async def set_document_signature(document_id: str, payload: dict,
+                                     current=Depends(get_current_user)):
+        if current.get("role") not in {"Admin", "Manager"}:
+            raise HTTPException(status_code=403, detail="Only Admin or Manager may set signature status")
+        doc = await db[DOCUMENTS_COLL].find_one({"id": document_id}, {"_id": 0})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        new_status = payload.get("signature_status")
+        if new_status not in ("Signed", "Not Signed"):
+            raise HTTPException(status_code=400, detail="signature_status must be 'Signed' or 'Not Signed'")
+        signed_at = _iso() if new_status == "Signed" else None
+        await db[DOCUMENTS_COLL].update_one(
+            {"id": document_id},
+            {"$set": {
+                "signature_status": new_status,
+                "signed_at": signed_at,
+                "signed_by": current.get("email") if new_status == "Signed" else None,
+                "updated_at": _iso(),
+                "updated_by": current.get("email"),
+            }},
+        )
+        updated = await db[DOCUMENTS_COLL].find_one({"id": document_id}, {"_id": 0})
+        return _strip_storage(updated)
 
     return router

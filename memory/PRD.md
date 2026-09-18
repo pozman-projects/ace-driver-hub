@@ -2020,3 +2020,79 @@ write wall (EB-R01) and existing document sensitivity gates.
 - No new role added. No permission-policy engine. No Activation policy
   change. No numbering policy change. No document policy redesign. No
   out-of-scope changes.
+
+---
+
+## MR-04B — Canonical Activation Sources + Active Readiness Gate (2026-02-26)
+
+**Scope**: Implement the LOCKED V1 Blueprint activation gate. Exactly seven
+mandatory items enforced at the canonical Driver update boundary. Close the
+P0 direct-API bypass. Add minimum canonical data required by items 4/6/7.
+
+### Backend
+- `backend/activation_module.py`:
+  * **`blueprint_v1_readiness(db, driver_id)`** — new module-level function.
+    Single authoritative Blueprint V1 readiness engine returning
+    `{readiness, items[7], missing}`. Never leaks protected `business_name`
+    or `abn` values in `reason` — reports state only.
+  * Item sources:
+    1. Driver Licence — composite of canonical `licence.exists` +
+       `licence.not_expired` + `driver_licences.evidence_document_id`.
+    2. Company Details — `drivers.business_name` non-blank.
+    3. ABN — `drivers.abn` non-blank (unconditional; no V1 exemption).
+    4. Certificate of Business Registration — canonical Document with
+       `document_type == "Certificate of Business Registration"` linked to
+       the Driver via `document_links`. Generic StartingDocument does NOT
+       satisfy.
+    5. Truck Insurance — `svc._resolve_automatic(vehicle_insurance.current)`
+       (canonical compliance engine).
+    6. Blink Driver App — `drivers.blink_driver_app_complete == True`.
+       Legacy rows without this key evaluate as False.
+    7. Driver Contract Signed — canonical Document `Driver Contract` linked
+       to Driver with `signature_status == "Signed"`. Presence alone does
+       not satisfy.
+  * `GET /api/drivers/{id}/blueprint-readiness` — new read-only endpoint.
+  * Existing `ActivationService`, template seeding, override workflow,
+    history and per-item override rules **untouched** — no duplicate
+    readiness engine.
+- `backend/registers.py`:
+  * `DriverBase.blink_driver_app_complete: Optional[bool] = False` — new
+    canonical scalar. Legacy defaults to False.
+  * `DriverUpdate.blink_driver_app_complete: Optional[bool]` — updatable
+    through the normal Driver update path (MR-07A permissions apply).
+  * **`PUT /api/drivers/{id}`** — now consults `blueprint_v1_readiness`
+    when the request transitions the driver from non-Active into Active.
+    On Not Ready → returns HTTP 409 `{code: DRIVER_NOT_READY, readiness,
+    missing:[{key,label,status}]}` **before** any mutation. Ordinary edits
+    on already-Active drivers and non-Active↔non-Active transitions are
+    NOT gated. Direct API bypass is closed.
+- `backend/documents_module.py`:
+  * `DocumentType.CertificateOfBusinessRegistration = "Certificate of Business Registration"`.
+  * `PATCH /api/documents/{id}/signature` — smallest canonical signature-
+    state edit. Admin/Manager only. Sets
+    `signature_status ∈ {"Signed","Not Signed"}` + `signed_at` + `signed_by`.
+    No electronic signing, no external provider.
+
+### Frontend
+- No changes required. The DCC Activation card and Activation screen
+  already consume backend truth. The new `/api/drivers/{id}/blueprint-readiness`
+  is available for direct consumption whenever the card is rewired
+  (out-of-scope for this package per Part 10 "no frontend readiness
+  computation").
+
+### Tests
+- `backend/tests/test_mr04b_activation_gate.py` — **new**, 14 acceptance
+  tests: exact seven, ready-driver activates, each of the 7 items missing
+  blocks activation (7 parametrized cases), Active driver ordinary edit,
+  non-Active↔non-Active transition, contract signed strict, business
+  registration certificate strict, permission-leak check. **All 14 pass**.
+- Targeted regression: `test_mr07a_permissions.py`, `test_registers_eb02.py`,
+  `test_documents_eb05.py`, `test_ebr03b_ii_inline_evidence.py`,
+  `test_activation_eb10.py`. **133 passed** in aggregate.
+
+### Confirmations
+- `main` untouched. Production untouched. No real ACE data migrated.
+- Exactly seven mandatory blockers. No extra mandatory items. No Vehicle
+  Registration blocker added. No duplicate expiry logic. No external
+  Blink integration. No electronic signing. No second override system.
+  No document architecture redesign. No numbering changes.

@@ -384,6 +384,159 @@ async def seed_default_template(db):
 # ═══════════════════════════════════════════════════════════════════════════
 # ACTIVATION SERVICE (readiness engine)
 # ═══════════════════════════════════════════════════════════════════════════
+
+# MR-04B · Locked V1 Blueprint activation checklist. EXACT SEVEN. This is the
+# authoritative gate. Ordinary Driver updates that attempt to transition into
+# Active MUST call `blueprint_v1_readiness` first. Overrides remain the sole
+# audited path to activate despite an incomplete item.
+BLUEPRINT_V1_ITEM_KEYS = [
+    "driver_licence",
+    "company_details",
+    "abn",
+    "business_registration_certificate",
+    "truck_insurance",
+    "blink_driver_app",
+    "driver_contract_signed",
+]
+
+BLUEPRINT_V1_ITEM_LABELS = {
+    "driver_licence": "Driver Licence",
+    "company_details": "Company Details",
+    "abn": "ABN",
+    "business_registration_certificate": "Certificate of Business Registration",
+    "truck_insurance": "Truck Insurance",
+    "blink_driver_app": "Blink Driver App",
+    "driver_contract_signed": "Driver Contract Signed",
+}
+
+
+async def blueprint_v1_readiness(db, driver_id: str) -> Dict[str, Any]:
+    """MR-04B · Single authoritative Blueprint V1 readiness engine.
+
+    Returns:
+      {
+        "readiness": "Ready" | "Not Ready",
+        "items": [
+          {"key", "label", "mandatory": True, "complete": bool,
+           "status": "Complete" | "Missing" | "Incomplete", "reason": str,
+           "source_id": str | None}
+        ],
+        "missing": [item_keys...]
+      }
+    No protected values (business_name, abn) leak into `reason` — reason
+    only names the field state, not the value.
+    """
+    driver = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
+    if not driver:
+        return {"readiness": "Not Ready", "items": [], "missing": [], "error": "driver_not_found"}
+
+    svc = ActivationService(db)  # reuses canonical compliance dispatch
+    items: List[Dict[str, Any]] = []
+
+    def _add(key, complete, status, reason, source_id=None):
+        items.append({
+            "key": key,
+            "label": BLUEPRINT_V1_ITEM_LABELS[key],
+            "mandatory": True,
+            "complete": bool(complete),
+            "status": status,
+            "reason": reason,
+            "source_id": source_id,
+        })
+
+    # 1. Driver Licence — composite: exists AND not_expired AND canonical evidence
+    lic_exists = await svc._resolve_automatic({"source_entity_type": "licence", "source_field": "exists"}, driver)
+    lic_not_expired = await svc._resolve_automatic({"source_entity_type": "licence", "source_field": "not_expired"}, driver)
+    # Canonical evidence pointer (set by EVIDENCE_HOLDERS on upload)
+    lic_row = await db[LICENCES_COLL].find_one(
+        {"driver_id": driver_id, "is_primary": True, "is_archived": {"$ne": True}},
+        {"_id": 0, "evidence_document_id": 1, "id": 1},
+        sort=[("created_at", -1)],
+    )
+    lic_evidence_ok = bool(lic_row and lic_row.get("evidence_document_id"))
+    if lic_exists[0] == "Complete" and lic_not_expired[0] == "Complete" and lic_evidence_ok:
+        _add("driver_licence", True, "Complete", "Canonical primary licence current with evidence")
+    elif lic_exists[0] != "Complete":
+        _add("driver_licence", False, lic_exists[0], lic_exists[1])
+    elif lic_not_expired[0] != "Complete":
+        _add("driver_licence", False, lic_not_expired[0], lic_not_expired[1])
+    else:
+        _add("driver_licence", False, "Missing", "No canonical licence evidence attached")
+
+    # 2. Company Details — Driver.business_name non-empty
+    bn = (driver.get("business_name") or "").strip()
+    _add("company_details", bool(bn), "Complete" if bn else "Missing",
+         "business_name present" if bn else "business_name is blank")
+
+    # 3. ABN — Driver.abn non-empty (unconditional per locked V1 decision)
+    abn_v = (driver.get("abn") or "").strip()
+    _add("abn", bool(abn_v), "Complete" if abn_v else "Missing",
+         "ABN present" if abn_v else "ABN is blank")
+
+    # 4. Certificate of Business Registration — canonical Document linked to Driver
+    cbr_link = await db["document_links"].find_one(
+        {"entity_type": "Driver", "entity_id": driver_id, "is_archived": {"$ne": True}},
+        {"_id": 0, "document_id": 1},
+    ) if False else None  # avoid picking any random Driver-linked doc
+    # Find via link ∩ document_type
+    driver_doc_links = await db["document_links"].find(
+        {"entity_type": "Driver", "entity_id": driver_id, "is_archived": {"$ne": True}},
+        {"_id": 0, "document_id": 1},
+    ).to_list(500)
+    driver_doc_ids = [l["document_id"] for l in driver_doc_links if l.get("document_id")]
+    cbr = None
+    if driver_doc_ids:
+        cbr = await db[DOCUMENTS_COLL].find_one(
+            {"id": {"$in": driver_doc_ids},
+             "document_type": "Certificate of Business Registration",
+             "is_archived": {"$ne": True}},
+            {"_id": 0, "id": 1},
+        )
+    if cbr:
+        _add("business_registration_certificate", True, "Complete",
+             "Certificate of Business Registration linked to driver", cbr["id"])
+    else:
+        _add("business_registration_certificate", False, "Missing",
+             "No current Certificate of Business Registration linked to driver")
+
+    # 5. Truck Insurance — canonical compliance
+    ins = await svc._resolve_automatic(
+        {"source_entity_type": "vehicle_insurance", "source_field": "current"}, driver
+    )
+    _add("truck_insurance", ins[0] == "Complete", ins[0], ins[1])
+
+    # 6. Blink Driver App — canonical Driver scalar; legacy default False
+    blink = bool(driver.get("blink_driver_app_complete"))
+    _add("blink_driver_app", blink, "Complete" if blink else "Missing",
+         "blink_driver_app_complete=true" if blink else "blink_driver_app_complete=false")
+
+    # 7. Driver Contract Signed — canonical Driver Contract Document linked
+    #    to this Driver with signature_status=="Signed".
+    contract_linked = None
+    if driver_doc_ids:
+        contract_linked = await db[DOCUMENTS_COLL].find_one(
+            {"id": {"$in": driver_doc_ids},
+             "document_type": "Driver Contract",
+             "is_archived": {"$ne": True}},
+            {"_id": 0, "id": 1, "signature_status": 1},
+            sort=[("uploaded_at", -1)],
+        )
+    if not contract_linked:
+        _add("driver_contract_signed", False, "Missing", "No current Driver Contract linked to driver")
+    elif (contract_linked.get("signature_status") or "Not Signed") == "Signed":
+        _add("driver_contract_signed", True, "Complete", "Driver Contract signed", contract_linked["id"])
+    else:
+        _add("driver_contract_signed", False, "Incomplete",
+             "Driver Contract on file but signature_status is not 'Signed'", contract_linked["id"])
+
+    missing = [i["key"] for i in items if not i["complete"]]
+    return {
+        "readiness": "Ready" if not missing else "Not Ready",
+        "items": items,
+        "missing": missing,
+    }
+
+
 class ActivationService:
     def __init__(self, db):
         self.db = db
@@ -1192,6 +1345,16 @@ def build_activation_router(db, get_current_user):
         if not drv:
             raise HTTPException(status_code=404, detail="Driver not found")
         return await svc.get_full(driver_id)
+
+    # MR-04B · Canonical Blueprint V1 readiness endpoint. Reads only.
+    # Consumers (DCC card, Activation screen, Driver update gate) must read
+    # this ONE result — never compute readiness locally.
+    @router.get("/drivers/{driver_id}/blueprint-readiness")
+    async def get_blueprint_readiness(driver_id: str, current=Depends(get_current_user)):
+        drv = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0, "id": 1})
+        if not drv:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        return await blueprint_v1_readiness(db, driver_id)
 
     @router.post("/drivers/{driver_id}/activation/start")
     async def start(driver_id: str, current=Depends(get_current_user)):

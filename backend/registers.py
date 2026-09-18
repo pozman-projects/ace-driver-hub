@@ -166,6 +166,9 @@ class DriverBase(BaseModel):
     abn: Optional[str] = None
     payroll_number: Optional[str] = None
     payment_percentage: Optional[float] = None
+    # MR-04B · Blueprint V1 activation item #6. Legacy rows without this
+    # field are treated as False by the readiness engine.
+    blink_driver_app_complete: Optional[bool] = False
 
     @field_validator("payment_percentage")
     @classmethod
@@ -207,6 +210,7 @@ class DriverUpdate(BaseModel):
     abn: Optional[str] = None
     payroll_number: Optional[str] = None
     payment_percentage: Optional[float] = None
+    blink_driver_app_complete: Optional[bool] = None
     is_archived: Optional[bool] = None
 
     @field_validator("payment_percentage")
@@ -742,6 +746,32 @@ def build_registers_router(db, get_current_user):
             await _ensure_unique(db, DRIVERS_COLL, "driver_code", updates["driver_code"], exclude_id=driver_id)
         if "dispatch_number" in updates:
             await _ensure_unique_dispatch(db, updates["dispatch_number"], exclude_id=driver_id)
+        # MR-04B · Active transition readiness gate. Only enforced when the
+        # request is transitioning from a non-Active state INTO Active. Edits
+        # on already-Active drivers, or transitions between non-Active states,
+        # do not invoke the gate.
+        incoming_status = updates.get("driver_status")
+        if isinstance(incoming_status, DriverStatus):
+            incoming_status = incoming_status.value
+        prior_status = existing.get("driver_status") or existing.get("status")
+        if (
+            incoming_status == DriverStatus.Active.value
+            and prior_status != DriverStatus.Active.value
+        ):
+            from activation_module import blueprint_v1_readiness
+            readiness = await blueprint_v1_readiness(db, driver_id)
+            if readiness["readiness"] != "Ready":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "DRIVER_NOT_READY",
+                        "readiness": readiness["readiness"],
+                        "missing": [
+                            {"key": i["key"], "label": i["label"], "status": i["status"]}
+                            for i in readiness["items"] if not i["complete"]
+                        ],
+                    },
+                )
         # Mirror canonical → legacy on update where relevant
         if "full_name" in updates:
             updates["name"] = updates["full_name"]

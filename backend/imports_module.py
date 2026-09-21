@@ -990,7 +990,11 @@ def build_imports_router(db, get_current_user):
 
     @router.post("/imports/{job_id}/commit")
     async def commit_job(job_id: str, payload: Optional[dict] = None, current=Depends(get_current_user)):
-        _require_role(current, ("Admin", "Manager", "Compliance"))
+        # MR-08B-P1 · MR-07B locked Import Commit to Admin/Manager only.
+        # Validation and conflict resolution remain wider (Admin/Manager/
+        # Compliance/Allocator) so Compliance can still prepare imports —
+        # only the final canonical write is management-authority.
+        _require_role(current, ("Admin", "Manager"))
         job = await _get_job(job_id)
         blocking = await db[IMPORT_CONFLICTS].count_documents({
             "import_job_id": job_id,

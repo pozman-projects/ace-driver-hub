@@ -2611,3 +2611,40 @@ Generic Driver PUT now rejects both archive paths and instructs callers to use t
 staging only · main untouched · Production untouched · Allocator cannot archive Driver · Compliance cannot · ReadOnly cannot · single canonical Driver archive lifecycle · generic PUT cannot create partial archive state · MR-07B-FIX Active authority unchanged · MR-04 unchanged · MR-08A unchanged · no other role policy changed · no out-of-scope changes.
 
 **FUNCTIONAL CONFORMANCE: PASS**
+
+---
+## MR-08B-P1 · Reporting Foundation Security + Import Role Alignment (feb-2026)
+
+Small pre-feature security package. No Report Builder / Company Manager / Theme / Skin built yet — those wait on owner decisions Q-A…Q-G.
+
+### Part A · Import Commit role drift
+- **Before:** `POST /api/imports/{job_id}/commit` accepted `{Admin, Manager, Compliance}` — MR-07B locked commit to Admin/Manager only.
+- **After:** `_require_role(current, ("Admin", "Manager"))`.
+- Validation, inspection, mapping, file upload, and conflict resolution all remain `{Admin, Manager, Compliance, Allocator}` — Compliance may still prepare imports.
+- File changed: `backend/imports_module.py` (1 line, plus explanatory comment).
+
+### Part B · Driver Profile PDF MR-07A leak-guard
+Traced snapshot path: `POST /api/drivers/{id}/exports/profile-pdf` → `ExportService.generate()` → `_resolve_snapshot()` → sets `account_visible = role in {"Manager","Admin"}` → conditionally attaches `snapshot["business"]` only when true → `driver_pdf_renderer.render_profile_pdf()` reads `snapshot["business"]` via `.get(...)` and hides the section when `permissions.account_visible` is falsy.
+
+**Verified via 4 layers:**
+1. Snapshot helper — Compliance/Allocator/ReadOnly all receive `account_visible=False` and empty `business` dict.
+2. Generated PDF (Compliance) — pypdf text extraction confirms none of the four sensitive markers appear.
+3. Generated PDF (Admin/Manager control) — markers DO appear, proving the leak-guard is gating, not accidentally hiding.
+4. Route-level — Allocator/ReadOnly cannot even reach the Profile PDF endpoint (MR-07B 403).
+
+**No leak found.** No fix required in renderer or export service.
+
+### Files changed
+- `backend/imports_module.py` (Part A)
+- **NEW** `backend/tests/test_mr08b_p1_security.py` (13 tests)
+
+### Test results
+- MR-08B-P1: **13/13 PASS**
+- MR-07A regression: **27/27 PASS**
+- MR-07B regression: **68/68 PASS**
+- Combined: **108/108 PASS**
+
+### Confirmations
+staging only · main untouched · Production untouched · no ACE data migrated · Compliance/Allocator/ReadOnly cannot commit imports · Admin/Manager can · Compliance/Allocator/ReadOnly cannot access MR-07A sensitive values via Profile PDF (snapshot + PDF text both verified) · MR-07A remains canonical authority · MR-07B unchanged except correction of the pre-existing Import Commit drift · existing Driver PDF architecture preserved · StorageAdapter untouched · no MR-08B feature build started · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**

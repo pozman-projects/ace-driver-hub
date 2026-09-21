@@ -85,6 +85,7 @@ export default function AdminUtilitiesCard({ driverId, role, data }) {
 
   const utilities = [
     { key: "company", label: "Company Manager", to: "/administration/companies", available: canManage, testid: "util-company" },
+    { key: "reports", label: "Report Builder", to: "/administration/reports", available: true, testid: "util-reports" },
     { key: "docs", label: "Open Document Library", to: `/documents?entity_type=Driver&entity_id=${driverId}`, available: true, testid: "util-open-docs" },
     { key: "upload", label: "Upload supporting document", to: `/documents?entity_type=Driver&entity_id=${driverId}&upload=1`, available: true, testid: "util-upload" },
     { key: "imports", label: "Open Import Centre", to: "/imports", available: canManage, testid: "util-imports" },

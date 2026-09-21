@@ -672,6 +672,10 @@ app.include_router(build_driver_export_router(db, get_current_user))
 from company_module import build_router as build_company_router, seed_company_registry  # noqa: E402
 app.include_router(build_company_router(db, get_current_user))
 
+# --- MR-08B-P3 · Canonical Report Builder ---
+from report_builder_module import build_router as build_reports_router  # noqa: E402
+app.include_router(build_reports_router(db, get_current_user))
+
 # --- EB-12 Migration Preparation ---
 from migration_prep_module import build_migration_prep_router  # noqa: E402
 app.include_router(build_migration_prep_router(db, get_current_user))

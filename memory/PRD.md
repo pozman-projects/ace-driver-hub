@@ -2714,3 +2714,57 @@ staging only · main untouched · Production untouched · no real ACE data migra
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL & INTERACTION CONFORMANCE: PASS**
+
+---
+## MR-08B-P3 · Canonical Report Builder (feb-2026)
+
+V1 one-source, no-join Report Builder across 13 owner-approved canonical domains. CSV + XLSX export via `StorageAdapter`. Sensitive-field and document-sensitivity enforcement fully server-side and reuses MR-07A / MR-07B / documents_module policy.
+
+### Sources (all owner-approved)
+`drivers · owners · vehicles · equipment · driver-licences · vehicle-registrations · vehicle-insurance · vehicle-inspections · vehicle-defects · vehicle-maintenance · equipment-compliance · activation-readiness · documents`
+
+### V1 explicitly excludes
+PDF · saved report definitions · scheduling · emailed reports · dashboards/charts · grouping · cross-source joins · calculated fields · custom SQL.
+
+### Files changed
+- **NEW** `backend/report_builder_module.py` — source registry, RunRequest validation, filter/sort engine, CSV+XLSX generators, StorageAdapter integration, export history collection, download route.
+- `backend/server.py` — router registration.
+- **NEW** `backend/tests/test_mr08b_p3_reports.py` — **30/30 pass**.
+- **NEW** `frontend/src/pages/ReportBuilderPage.jsx` — pick source → fields → filters → sort → run → CSV/XLSX.
+- `frontend/src/App.js` — route `/administration/reports`.
+- `frontend/src/components/driver-cc/AdminUtilitiesCard.jsx` — Report Builder shortcut added (open to all authenticated users).
+
+### Endpoints
+- `GET /api/reports/sources`
+- `GET /api/reports/sources/{source}/fields` (role-filtered)
+- `POST /api/reports/run` (validated, ≤1000 rows preview)
+- `POST /api/reports/export/csv` (≤10 000 rows, formula-neutralised, StorageAdapter)
+- `POST /api/reports/export/xlsx` (StorageAdapter, header freeze, autofilter, no formulas)
+- `GET /api/reports/exports` (creator or Admin/Manager)
+- `GET /api/reports/exports/{id}/download` (creator or Admin/Manager)
+
+### Enforcement guarantees
+- **MR-07A** — Driver `business_name / abn / payroll_number / payment_percentage` hidden from field metadata + rejected on run/export for Compliance/Allocator/ReadOnly.
+- **Documents** — `_sensitivity_visibility()` mirrors canonical `documents_module._visible_by_sensitivity`. Restricted rows never returned for Compliance/Allocator/ReadOnly.
+- **Filters** — strict operator-per-type allow-list. Raw Mongo operators + regex + `$where` rejected.
+- **Sort** — max 2 fields; only sortable canonical fields.
+- **Archived** — excluded by default; `include_archived` cannot bypass sensitivity gates.
+- **CSV formula injection** — leading `= + - @` neutralised with a `'` prefix (tested).
+- **XLSX** — no formulas, no macros, sheet-name sanitised.
+- **Activation source** — read-only via canonical `blueprint_v1_readiness`; no second readiness calculator.
+- **Download** — creator-or-Admin/Manager only.
+- **Revalidation** — every export path re-runs `_validate_request` server-side.
+
+### Regression
+- MR-08B-P3: **30/30**
+- MR-08B-P2: **27/27**
+- MR-08B-P1: **13/13**
+- MR-07A: **27/27**
+- MR-07B: **68/68**
+- **Combined: 165/165 PASS**
+
+### Confirmations
+staging only · main untouched · Production untouched · no ACE data migrated · explicit source allow-list · one source per report · no raw Mongo query · no PDF · no saved defs · no charts · no scheduling · no email · MR-07A enforced server-side · MR-07B preserved · document sensitivity preserved · StorageAdapter used · existing Driver PDF exports unchanged · Company Manager unchanged · no Theme/Skin built · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: PASS**

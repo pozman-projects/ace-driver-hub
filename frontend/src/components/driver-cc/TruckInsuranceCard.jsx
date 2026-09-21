@@ -11,7 +11,7 @@ export default function TruckInsuranceCard({ data, role, onSaved }) {
     <RightCard title="Truck Insurance" testid="ci-insurance" section="insurance">
       {i ? (
         <>
-          <InlineField label="Insurer" value={i.insurer} testid="ci-insurance-insurer" />
+          <InlineField label="Provider" value={i.provider} testid="ci-insurance-provider" />
           <InlineField label="Policy" value={i.policy_number} testid="ci-insurance-policy" mono />
           <InlineField label="Cover" value={i.cover_type} testid="ci-insurance-cover" />
           <InlineField label="Expiry" value={i.expiry_date} testid="ci-insurance-expiry" />

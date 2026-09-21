@@ -12,7 +12,8 @@ export default function TruckRegistrationCard({ data, role, onSaved }) {
     <RightCard title="Truck Registration" testid="ci-registration" section="registration">
       {r ? (
         <>
-          <InlineField label="Rego" value={r.registration_number} testid="ci-registration-number" mono />
+          <InlineField label="Rego" value={r.registration_number_snapshot} testid="ci-registration-number" mono />
+          <InlineField label="Class" value={r.registration_class} testid="ci-registration-class" />
           <InlineField label="State" value={r.state} testid="ci-registration-state" />
           <InlineField label="Expiry" value={r.expiry_date} testid="ci-registration-expiry" />
           <div className="pt-1"><StatusPill status={s?.status || "Compliant"} compact testid="ci-registration-status" /></div>
@@ -21,7 +22,7 @@ export default function TruckRegistrationCard({ data, role, onSaved }) {
             canEdit={canEdit}
             acceptHint=".pdf,image/*"
             uploadPayload={{
-              title: `Vehicle Registration — ${r.registration_number || r.id}`,
+              title: `Vehicle Registration — ${r.registration_number_snapshot || r.id}`,
               document_type: "Vehicle Registration",
               entity_type: "VehicleRegistration",
               entity_id: r.id,

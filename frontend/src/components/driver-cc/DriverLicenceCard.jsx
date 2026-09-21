@@ -16,6 +16,11 @@ export default function DriverLicenceCard({ data, role, onSaved }) {
           <InlineField label="State" value={l.state} testid="ci-licence-state" />
           <InlineField label="Expiry" value={l.expiry_date} testid="ci-licence-expiry" />
           <div className="pt-1"><StatusPill status={s?.status || "Compliant"} compact testid="ci-licence-status" /></div>
+          <div className="pt-1 border-t border-slate-100 mt-1" data-testid="ci-licence-verification">
+            <InlineField label="Verified" value={l.verification_status || null} testid="ci-licence-verification-status" />
+            <InlineField label="Checked" value={l.verified_at ? String(l.verified_at).slice(0, 10) : null} testid="ci-licence-verified-at" />
+            <InlineField label="By" value={l.verified_by || null} testid="ci-licence-verified-by" />
+          </div>
           <EvidenceActions
             evidenceDoc={evidence}
             canEdit={canEdit}

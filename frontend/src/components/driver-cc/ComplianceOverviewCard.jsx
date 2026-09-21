@@ -6,13 +6,27 @@ import { RightCard, StatusPill, MiniStat } from "./driverCCUtils";
 export default function ComplianceOverviewCard({ data, driverId }) {
   const ci = data.compliance_intelligence || {};
   const counts = data.alert_counts || {};
+  // FA-01 · "n of n Compliant" primary count, aggregated across the
+  // canonical driver + vehicle component summaries. No new calculator —
+  // we consume the same components the right-rail cards use.
+  const components = [
+    ...(ci.driver_summary?.components || []),
+    ...(ci.vehicle_summary?.components || []),
+  ];
+  const total = components.length;
+  const compliantCount = components.filter((c) => c.status === "Compliant").length;
+  const worst = ci.worst_status || "Compliant";
   return (
     <RightCard title="Compliance Overview" testid="ci-overview" section="ci-overview">
-      <div className="flex items-center justify-between">
-        <StatusPill status={ci.worst_status || "Compliant"} testid="ci-worst-status" />
-        <span className="text-[10px] text-slate-500">Scope: {ci.worst_scope || "driver"}</span>
+      <div className="flex items-baseline justify-between mb-1">
+        <div className="text-lg font-semibold text-slate-900" data-testid="ci-compliant-count">
+          {total > 0 ? `${compliantCount} of ${total} Compliant` : "No components tracked"}
+        </div>
+        <StatusPill status={worst} compact testid="ci-worst-status" />
       </div>
-      <p className="text-[11px] text-slate-500 mt-2" data-testid="ci-worst-explanation">{ci.explanation}</p>
+      <p className="text-[11px] text-slate-500" data-testid="ci-worst-explanation">
+        {ci.explanation}
+      </p>
       <div className="grid grid-cols-3 gap-2 mt-3 text-center">
         <MiniStat label="Active" value={counts.active} variant={counts.active > 0 ? "warn" : "ok"} testid="ci-count-active" />
         <MiniStat label="Ack" value={counts.acknowledged} testid="ci-count-ack" />

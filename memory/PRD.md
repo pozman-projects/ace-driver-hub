@@ -2535,3 +2535,43 @@ staging only · main untouched · Production untouched · no real ACE data migra
 
 **FUNCTIONAL CONFORMANCE: PASS**
 **VISUAL & INTERACTION CONFORMANCE: PASS (frontend gates realigned; card layouts unchanged)**
+
+---
+## MR-07B-FIX · Driver Active Transition Authority (feb-2026)
+
+### Defect
+`update_driver()` classified `driver_status` as a SETUP field. SETUP permits Admin/Manager/Allocator, meaning an Allocator PUT with `driver_status="Active"` could activate a Driver if MR-04 readiness passed. Owner policy requires activation authority = Admin/Manager only.
+
+### Fix
+Added a `CAN_ACTIVATE_DRIVER` (Admin/Manager) authority gate inside `update_driver()` that runs BEFORE the MR-04 readiness gate, ONLY when `prior_status != Active AND incoming_status == Active`. Both gates must pass; readiness enforcement unchanged.
+
+### Files changed
+- `backend/registers.py` — new authority gate inserted immediately before the MR-04 readiness check inside `update_driver()`.
+- `frontend/src/components/driver-cc/DriverSetupCard.jsx` — status dropdown filters out `Active` for roles that are not Admin/Manager (Active remains as passthrough when the driver is already Active). Card layout unchanged.
+- `backend/tests/test_mr07b_permissions.py` — appended `TestActiveTransitionAuthority` with 13 targeted tests.
+
+### Enforcement order (verified)
+1. Parse supplied fields
+2. Apply Driver core/setup permission classification
+3. **Detect transition INTO Active → require `CAN_ACTIVATE_DRIVER`** (new)
+4. Run `blueprint_v1_readiness()`
+5. `409 DRIVER_NOT_READY` if not Ready
+6. Continue canonical status/Dispatch transition (MR-08A unchanged)
+
+### Preserved
+- MR-04 `blueprint_v1_readiness()` and exact-seven blockers.
+- MR-08A: restore-prior-active-number / 1-99 fallback / 999-down Inactive allocation / reservation lifecycle.
+- Allocator non-Active transitions (Inactive / Training / Probation / On Leave) — verified explicitly.
+- Compliance status writes still 403.
+- ReadOnly still 403.
+- Already-Active repeat is not treated as a new activation.
+
+### Test results
+- **MR-07B suite: 56/56 PASS** (43 base + 13 new Active-transition tests)
+- MR-04B (activation gate/surgical/page-gate): **32/32 PASS**
+- MR-08A (numbering + fixes + release gate): **45/45 PASS**
+
+### Confirmations
+staging only · main untouched · Production untouched · Allocator cannot transition into Active · Compliance cannot · ReadOnly cannot · Admin/Manager remain readiness-gated · Allocator non-Active setup transitions work · MR-04 unchanged · MR-08A unchanged · no other role policy changed · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**

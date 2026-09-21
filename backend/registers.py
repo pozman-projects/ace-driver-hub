@@ -796,14 +796,28 @@ def build_registers_router(db, get_current_user):
             await _ensure_unique(db, DRIVERS_COLL, "driver_code", updates["driver_code"], exclude_id=driver_id)
         if "dispatch_number" in updates:
             await _ensure_unique_dispatch(db, updates["dispatch_number"], exclude_id=driver_id)
-        # MR-04B · Active transition readiness gate. Only enforced when the
-        # request is transitioning from a non-Active state INTO Active. Edits
-        # on already-Active drivers, or transitions between non-Active states,
-        # do not invoke the gate.
+        # MR-07B-FIX · Driver transition INTO Active is an activation authority
+        # action (Admin/Manager only). Allocator's SETUP permission covers
+        # non-Active transitions; it must NOT include the Active transition.
+        # This gate runs BEFORE MR-04 readiness so both must pass in order.
         incoming_status = updates.get("driver_status")
         if isinstance(incoming_status, DriverStatus):
             incoming_status = incoming_status.value
         prior_status = existing.get("driver_status") or existing.get("status")
+        if (
+            incoming_status == DriverStatus.Active.value
+            and prior_status != DriverStatus.Active.value
+        ):
+            from role_matrix import CAN_ACTIVATE_DRIVER, require
+            require(
+                current,
+                CAN_ACTIVATE_DRIVER,
+                "Only Admin or Manager may transition a Driver into Active",
+            )
+        # MR-04B · Active transition readiness gate. Only enforced when the
+        # request is transitioning from a non-Active state INTO Active. Edits
+        # on already-Active drivers, or transitions between non-Active states,
+        # do not invoke the gate.
         if (
             incoming_status == DriverStatus.Active.value
             and prior_status != DriverStatus.Active.value

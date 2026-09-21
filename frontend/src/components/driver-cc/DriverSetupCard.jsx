@@ -267,7 +267,18 @@ export default function DriverSetupCard({ data, role, onSaved }) {
               data-testid="edit-driver-status"
               className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
             >
-              {["Active", "Training", "Probation", "On Leave", "Inactive", "Archived"].map((s) => <option key={s} value={s}>{s}</option>)}
+              {
+                // MR-07B-FIX · Only Admin/Manager may transition a Driver into
+                // Active. Allocator sees setup transitions only. Active always
+                // remains selectable for the current-state passthrough.
+                (["Active", "Training", "Probation", "On Leave", "Inactive", "Archived"])
+                  .filter((s) => {
+                    if (s !== "Active") return true;
+                    if (["Admin", "Manager"].includes(role)) return true;
+                    return form.driver_status === "Active"; // already Active — allow passthrough
+                  })
+                  .map((s) => <option key={s} value={s}>{s}</option>)
+              }
             </select>
           </div>
         </>

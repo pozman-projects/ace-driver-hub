@@ -2575,3 +2575,39 @@ Added a `CAN_ACTIVATE_DRIVER` (Admin/Manager) authority gate inside `update_driv
 staging only · main untouched · Production untouched · Allocator cannot transition into Active · Compliance cannot · ReadOnly cannot · Admin/Manager remain readiness-gated · Allocator non-Active setup transitions work · MR-04 unchanged · MR-08A unchanged · no other role policy changed · no out-of-scope changes.
 
 **FUNCTIONAL CONFORMANCE: PASS**
+
+---
+## MR-07B-FIX2 · Driver Archive Authority (feb-2026)
+
+### Defect
+`update_driver()` classified `driver_status` as a SETUP field. Even after MR-07B-FIX added the Active-transition authority gate, `driver_status="Archived"` could still be set by any SETUP-permitted role (Admin/Manager/Allocator) via generic PUT, and `is_archived=true` could be flipped via PUT — both bypassing the canonical archive lifecycle (`DELETE /api/drivers/{id}`).
+
+### Fix
+Generic Driver PUT now rejects both archive paths and instructs callers to use the canonical archive endpoint. The canonical `DELETE /api/drivers/{id}` route already required Admin/Manager and atomically set `is_archived`, `driver_status=Archived`, and `status` mirror. There is now exactly one archive lifecycle.
+
+### Files changed
+- `backend/registers.py` — `update_driver()` rejects:
+  - `driver_status == Archived` when `prior_status != Archived` → 400 `ARCHIVE_NOT_ALLOWED_VIA_PUT`
+  - `is_archived == True` when `existing.is_archived != True` → 400 `ARCHIVE_NOT_ALLOWED_VIA_PUT`
+  Idempotent no-ops (already Archived + payload `Archived`) still succeed (200).
+- `frontend/src/components/driver-cc/DriverSetupCard.jsx` — `Archived` removed from the status dropdown for all roles; kept only as current-state passthrough if the driver is already Archived. Card layout unchanged.
+- `backend/tests/test_mr07b_permissions.py` — appended `TestArchiveAuthority` (12 tests).
+- `backend/tests/test_mr08a_numbering.py`, `backend/tests/test_mr08a_fix_integrity.py` — two archive assertions switched from PUT to DELETE (canonical route) to reflect the single archive lifecycle.
+
+### Preserved
+- MR-07B-FIX active-transition authority (`CAN_ACTIVATE_DRIVER`) intact.
+- MR-04 readiness contents intact.
+- MR-08A · archive path never allocates an inactive Dispatch number (numbering assignment lives in the PUT path only). Verified.
+- ReadOnly / Compliance / Allocator DELETE and PUT archive attempts all 403 / 400.
+
+### Test results
+- MR-07B (base + Active-fix + Archive-fix): **68/68 PASS**
+- MR-07A: **27/27 PASS**
+- MR-04B: **32/32 PASS**
+- MR-08A (numbering + integrity + release gate): **45/45 PASS**
+- Combined regression: **172/172 PASS**
+
+### Confirmations
+staging only · main untouched · Production untouched · Allocator cannot archive Driver · Compliance cannot · ReadOnly cannot · single canonical Driver archive lifecycle · generic PUT cannot create partial archive state · MR-07B-FIX Active authority unchanged · MR-04 unchanged · MR-08A unchanged · no other role policy changed · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**

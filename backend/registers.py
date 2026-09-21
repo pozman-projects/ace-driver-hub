@@ -814,6 +814,37 @@ def build_registers_router(db, get_current_user):
                 CAN_ACTIVATE_DRIVER,
                 "Only Admin or Manager may transition a Driver into Active",
             )
+        # MR-07B-FIX2 · Driver archive is owned exclusively by the canonical
+        # archive endpoint (DELETE /api/drivers/{id}), which sets is_archived,
+        # driver_status=Archived, and status mirror atomically. Generic PUT
+        # must NOT provide a second archive path — that would risk partial
+        # archive state and would bypass the Admin/Manager authority gate for
+        # any caller that has SETUP write access.
+        if (
+            incoming_status == DriverStatus.Archived.value
+            and prior_status != DriverStatus.Archived.value
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "ARCHIVE_NOT_ALLOWED_VIA_PUT",
+                    "message": ("Driver archive is only permitted through the "
+                                 "canonical archive endpoint (DELETE /api/drivers/{id})."),
+                },
+            )
+        if (
+            "is_archived" in updates
+            and updates.get("is_archived") is True
+            and not existing.get("is_archived")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "ARCHIVE_NOT_ALLOWED_VIA_PUT",
+                    "message": ("Setting is_archived via PUT is not permitted. "
+                                 "Use DELETE /api/drivers/{id} to archive."),
+                },
+            )
         # MR-04B · Active transition readiness gate. Only enforced when the
         # request is transitioning from a non-Active state INTO Active. Edits
         # on already-Active drivers, or transitions between non-Active states,

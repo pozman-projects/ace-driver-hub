@@ -218,9 +218,10 @@ class TestRegressions:
         assert drv["dispatch_number"] == "11"
 
     def test_archived_no_inactive(self, admin, db):
+        # MR-07B-FIX2 · archive is only via the canonical DELETE endpoint.
         d = _mk_driver(admin)
         db["drivers"].update_one({"id": d}, {"$set": {"driver_status": "Active", "dispatch_number": "12"}})
-        admin.put(f"{BASE_URL}/api/drivers/{d}", json={"driver_status": "Archived"}).raise_for_status()
+        admin.delete(f"{BASE_URL}/api/drivers/{d}").raise_for_status()
         drv = db["drivers"].find_one({"id": d})
         assert drv["dispatch_number"] == "12"
 

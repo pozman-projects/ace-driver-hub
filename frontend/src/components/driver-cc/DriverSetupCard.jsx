@@ -269,10 +269,15 @@ export default function DriverSetupCard({ data, role, onSaved }) {
             >
               {
                 // MR-07B-FIX · Only Admin/Manager may transition a Driver into
-                // Active. Allocator sees setup transitions only. Active always
-                // remains selectable for the current-state passthrough.
+                // Active. Allocator sees setup transitions only.
+                // MR-07B-FIX2 · Archived is a canonical archive-endpoint action
+                // (DELETE /api/drivers/{id}); it is NOT selectable from setup.
+                // Current-state passthrough preserved for either state so an
+                // already-Active or already-Archived driver still renders a
+                // valid option in the select.
                 (["Active", "Training", "Probation", "On Leave", "Inactive", "Archived"])
                   .filter((s) => {
+                    if (s === "Archived") return form.driver_status === "Archived";
                     if (s !== "Active") return true;
                     if (["Admin", "Manager"].includes(role)) return true;
                     return form.driver_status === "Active"; // already Active — allow passthrough

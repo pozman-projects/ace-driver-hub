@@ -552,3 +552,125 @@ class TestActiveTransitionAuthority:
         r2 = admin.put(f"{BASE_URL}/api/drivers/{did}",
                        json={"driver_status": "Inactive"}, timeout=15)
         assert r2.status_code == 200
+
+
+# ────────────────────────────────────────────────────────────────────────
+# MR-07B-FIX2 · Driver Archive authority
+# ────────────────────────────────────────────────────────────────────────
+class TestArchiveAuthority:
+    """Driver archive is owned exclusively by DELETE /api/drivers/{id}
+    (Admin/Manager). Generic PUT must not offer a second archive path via
+    either driver_status=Archived or is_archived=true."""
+
+    def _mk(self, admin, status="Training"):
+        r = admin.post(f"{BASE_URL}/api/drivers",
+                       json={"full_name": f"MR07BFIX2 {_tag()}",
+                             "driver_status": status}, timeout=15)
+        r.raise_for_status()
+        return r.json()["id"]
+
+    # 1-3 · Allocator / Compliance / ReadOnly PUT status=Archived → 400 (canonical path)
+    def test_allocator_cannot_set_archived_via_put(self, admin, allocator):
+        did = self._mk(admin)
+        r = allocator.put(f"{BASE_URL}/api/drivers/{did}",
+                          json={"driver_status": "Archived"}, timeout=15)
+        # Either 403 (setup gate) or 400 (archive-not-allowed). Both correct.
+        assert r.status_code in (400, 403), r.text
+        # Confirm state unchanged
+        d = admin.get(f"{BASE_URL}/api/drivers/{did}", timeout=15).json()
+        assert d["driver_status"] != "Archived"
+        assert not d.get("is_archived", False)
+
+    def test_compliance_cannot_set_archived_via_put(self, admin, compliance):
+        did = self._mk(admin)
+        r = compliance.put(f"{BASE_URL}/api/drivers/{did}",
+                            json={"driver_status": "Archived"}, timeout=15)
+        assert r.status_code in (400, 403), r.text
+
+    def test_readonly_cannot_set_archived_via_put(self, admin, readonly):
+        did = self._mk(admin)
+        r = readonly.put(f"{BASE_URL}/api/drivers/{did}",
+                          json={"driver_status": "Archived"}, timeout=15)
+        assert r.status_code == 403
+
+    # 4. Admin PUT status=Archived → 400 (canonical path required, no partial state)
+    def test_admin_put_status_archived_rejected(self, admin):
+        did = self._mk(admin)
+        r = admin.put(f"{BASE_URL}/api/drivers/{did}",
+                      json={"driver_status": "Archived"}, timeout=15)
+        assert r.status_code == 400
+        body = r.json()
+        assert body.get("detail", {}).get("code") == "ARCHIVE_NOT_ALLOWED_VIA_PUT"
+        # state unchanged
+        d = admin.get(f"{BASE_URL}/api/drivers/{did}", timeout=15).json()
+        assert d["driver_status"] != "Archived"
+        assert not d.get("is_archived", False)
+
+    # 5. Admin PUT is_archived=true → 400 (canonical path required)
+    def test_admin_put_is_archived_rejected(self, admin):
+        did = self._mk(admin)
+        r = admin.put(f"{BASE_URL}/api/drivers/{did}",
+                      json={"is_archived": True}, timeout=15)
+        assert r.status_code == 400
+        assert r.json().get("detail", {}).get("code") == "ARCHIVE_NOT_ALLOWED_VIA_PUT"
+
+    # 6. Manager DELETE /drivers/{id} → canonical archive succeeds
+    def test_manager_can_use_canonical_archive(self, admin, manager):
+        did = self._mk(admin)
+        r = manager.delete(f"{BASE_URL}/api/drivers/{did}", timeout=15)
+        assert r.status_code == 200, r.text
+        d = admin.get(f"{BASE_URL}/api/drivers/{did}", timeout=15).json()
+        assert d["driver_status"] == "Archived"
+        assert d.get("is_archived") is True
+
+    # 7. Admin DELETE /drivers/{id} → canonical archive succeeds
+    def test_admin_can_use_canonical_archive(self, admin):
+        did = self._mk(admin)
+        r = admin.delete(f"{BASE_URL}/api/drivers/{did}", timeout=15)
+        assert r.status_code == 200
+
+    # 8. Allocator DELETE /drivers/{id} → 403 (unchanged)
+    def test_allocator_cannot_use_canonical_archive(self, admin, allocator):
+        did = self._mk(admin)
+        r = allocator.delete(f"{BASE_URL}/api/drivers/{did}", timeout=15)
+        assert r.status_code == 403
+
+    # 9. Compliance DELETE /drivers/{id} → 403 (unchanged)
+    def test_compliance_cannot_use_canonical_archive(self, admin, compliance):
+        did = self._mk(admin)
+        r = compliance.delete(f"{BASE_URL}/api/drivers/{did}", timeout=15)
+        assert r.status_code == 403
+
+    # 10. Already-archived idempotent PUT with driver_status=Archived does NOT
+    #     transition (prior==incoming). Admin should get 200 on a no-op PUT
+    #     touching only other allowed fields, and archive-blocker must NOT
+    #     spuriously fire for an already-archived driver.
+    def test_already_archived_put_status_archived_is_noop(self, admin):
+        did = self._mk(admin)
+        admin.delete(f"{BASE_URL}/api/drivers/{did}", timeout=15).raise_for_status()
+        r = admin.put(f"{BASE_URL}/api/drivers/{did}",
+                      json={"driver_status": "Archived"}, timeout=15)
+        # Not a new archive event — must not 400.
+        assert r.status_code != 400, r.text
+
+    # 11. MR-07B-FIX regression — Active transition authority still enforced
+    def test_active_transition_authority_preserved(self, admin, allocator):
+        did = self._mk(admin, status="Inactive")
+        r = allocator.put(f"{BASE_URL}/api/drivers/{did}",
+                          json={"driver_status": "Active"}, timeout=15)
+        assert r.status_code == 403
+
+    # 12. Numbering regression · archiving must not allocate an inactive
+    #     Dispatch number. The canonical archive endpoint sets Archived
+    #     status directly; the MR-08A auto-assign logic in update_driver
+    #     never runs for the DELETE path.
+    def test_archive_does_not_allocate_inactive_dispatch(self, admin, db=None):
+        # (db fixture is optional; use raw query via admin.get and compare.)
+        did = self._mk(admin, status="Training")
+        before = admin.get(f"{BASE_URL}/api/drivers/{did}", timeout=15).json()
+        assert not before.get("dispatch_number")
+        admin.delete(f"{BASE_URL}/api/drivers/{did}", timeout=15).raise_for_status()
+        after = admin.get(f"{BASE_URL}/api/drivers/{did}", timeout=15).json()
+        # Archive path must NOT reserve or set a Dispatch number.
+        assert not after.get("dispatch_number"), \
+            f"Archive spuriously assigned Dispatch: {after.get('dispatch_number')}"

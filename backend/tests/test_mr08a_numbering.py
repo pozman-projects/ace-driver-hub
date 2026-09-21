@@ -189,10 +189,12 @@ class TestOnLeaveAndArchived:
         assert drv["dispatch_number"] == "7"
 
     def test_archived_does_not_get_new_inactive_number(self, admin, db):
+        # MR-07B-FIX2 · archive is only via the canonical DELETE endpoint.
         d = _mk_driver(admin, driver_status="Training")
         db["drivers"].update_one({"id": d}, {"$set": {"driver_status": "Active", "dispatch_number": "8"}})
-        admin.put(f"{BASE_URL}/api/drivers/{d}", json={"driver_status": "Archived"}).raise_for_status()
+        admin.delete(f"{BASE_URL}/api/drivers/{d}").raise_for_status()
         drv = db["drivers"].find_one({"id": d})
+        # Dispatch number preserved verbatim; no inactive-pool allocation on archive.
         assert drv["dispatch_number"] == "8"
 
 

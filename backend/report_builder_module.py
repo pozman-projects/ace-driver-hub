@@ -53,6 +53,8 @@ class Field_(BaseModel):
     label: str
     type: str  # string | number | date | boolean
     sortable: bool = True
+    filterable: bool = True
+    derived: bool = False
     sensitive: bool = False  # MR-07A driver account fields
 
 
@@ -70,8 +72,9 @@ class Source(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────
 # SOURCE REGISTRY
 # ─────────────────────────────────────────────────────────────────────────
-def _field(key, label, ftype, sortable=True, sensitive=False):
-    return Field_(key=key, label=label, type=ftype, sortable=sortable, sensitive=sensitive)
+def _field(key, label, ftype, sortable=True, filterable=True, derived=False, sensitive=False):
+    return Field_(key=key, label=label, type=ftype, sortable=sortable,
+                  filterable=filterable, derived=derived, sensitive=sensitive)
 
 
 REPORT_SOURCES: Dict[str, Source] = {
@@ -89,6 +92,8 @@ REPORT_SOURCES: Dict[str, Source] = {
             _field("start_date", "Start Date", "date"),
             _field("driver_status", "Status", "string"),
             _field("company_id", "Company ID", "string"),
+            _field("company_name", "Company", "string",
+                   sortable=False, filterable=False, derived=True),
             _field("business_name", "Business Name", "string", sensitive=True),
             _field("abn", "ABN", "string", sensitive=True),
             _field("payroll_number", "Payroll Number", "string", sensitive=True),
@@ -99,10 +104,17 @@ REPORT_SOURCES: Dict[str, Source] = {
         key="owners", label="Owners", collection="owners",
         fields=[
             _field("name", "Owner Name", "string"),
-            _field("trading_name", "Trading Name", "string"),
-            _field("primary_email", "Primary Email", "string"),
-            _field("primary_phone", "Primary Phone", "string"),
+            _field("owner_type", "Owner Type", "string"),
+            # Owner master ABN — NOT MR-07A sensitive Driver Account ABN.
+            _field("abn", "Owner ABN", "string"),
+            _field("primary_contact_name", "Primary Contact", "string"),
+            _field("mobile_number", "Mobile", "string"),
+            _field("email", "Email", "string"),
+            _field("business_address", "Business Address", "string", sortable=False),
+            _field("owner_status", "Status", "string"),
             _field("company_id", "Company ID", "string"),
+            _field("company_name", "Company", "string",
+                   sortable=False, filterable=False, derived=True),
         ],
     ),
     "vehicles": Source(
@@ -115,6 +127,8 @@ REPORT_SOURCES: Dict[str, Source] = {
             _field("vehicle_status", "Status", "string"),
             _field("owner_id", "Owner ID", "string"),
             _field("company_id", "Company ID", "string"),
+            _field("company_name", "Company", "string",
+                   sortable=False, filterable=False, derived=True),
         ],
     ),
     "equipment": Source(
@@ -122,9 +136,11 @@ REPORT_SOURCES: Dict[str, Source] = {
         fields=[
             _field("equipment_number", "Equipment #", "string"),
             _field("equipment_type", "Type", "string"),
-            _field("status", "Status", "string"),
+            _field("equipment_status", "Status", "string"),
             _field("owner_id", "Owner ID", "string"),
             _field("company_id", "Company ID", "string"),
+            _field("company_name", "Company", "string",
+                   sortable=False, filterable=False, derived=True),
         ],
     ),
     "driver-licences": Source(
@@ -134,15 +150,19 @@ REPORT_SOURCES: Dict[str, Source] = {
             _field("licence_number", "Licence #", "string"),
             _field("state", "State", "string"),
             _field("licence_class", "Class", "string"),
+            _field("issue_date", "Issue Date", "date"),
             _field("expiry_date", "Expiry", "date"),
             _field("status", "Status", "string"),
             _field("is_primary", "Primary", "boolean"),
+            _field("verification_status", "Verification Status", "string"),
         ],
     ),
     "vehicle-registrations": Source(
         key="vehicle-registrations", label="Vehicle Registrations", collection="vehicle_registrations",
         fields=[
             _field("vehicle_id", "Vehicle ID", "string"),
+            _field("registration_number_snapshot", "Registration #", "string"),
+            _field("registration_class", "Registration Class", "string"),
             _field("state", "State", "string"),
             _field("expiry_date", "Expiry", "date"),
             _field("status", "Status", "string"),
@@ -153,9 +173,9 @@ REPORT_SOURCES: Dict[str, Source] = {
         key="vehicle-insurance", label="Vehicle Insurance", collection="vehicle_insurance_policies",
         fields=[
             _field("vehicle_id", "Vehicle ID", "string"),
-            _field("insurer", "Insurer", "string"),
+            _field("provider", "Provider", "string"),
             _field("policy_number", "Policy #", "string"),
-            _field("policy_type", "Policy Type", "string"),
+            _field("cover_type", "Cover Type", "string"),
             _field("expiry_date", "Expiry", "date"),
             _field("status", "Status", "string"),
             _field("is_current", "Current", "boolean"),
@@ -167,18 +187,23 @@ REPORT_SOURCES: Dict[str, Source] = {
             _field("vehicle_id", "Vehicle ID", "string"),
             _field("inspection_type", "Type", "string"),
             _field("inspection_date", "Date", "date"),
-            _field("outcome", "Outcome", "string"),
-            _field("inspector", "Inspector", "string"),
+            _field("next_inspection_due", "Next Due", "date"),
+            _field("result", "Result", "string"),
+            _field("status", "Status", "string"),
+            _field("inspector_name", "Inspector", "string"),
         ],
     ),
     "vehicle-defects": Source(
         key="vehicle-defects", label="Vehicle Defects", collection="vehicle_defects",
         fields=[
             _field("vehicle_id", "Vehicle ID", "string"),
+            _field("defect_number", "Defect #", "string"),
             _field("severity", "Severity", "string"),
             _field("status", "Status", "string"),
-            _field("reported_at", "Reported", "date"),
-            _field("resolved_at", "Resolved", "date"),
+            _field("reported_date", "Reported", "date"),
+            _field("rectified_date", "Rectified", "date"),
+            _field("rectification_required", "Rectification Required", "boolean"),
+            _field("rectified_by", "Rectified By", "string"),
             _field("description", "Description", "string", sortable=False),
         ],
     ),
@@ -196,19 +221,24 @@ REPORT_SOURCES: Dict[str, Source] = {
         key="equipment-compliance", label="Equipment Compliance", collection="equipment_compliance_records",
         fields=[
             _field("equipment_id", "Equipment ID", "string"),
-            _field("check_type", "Check Type", "string"),
-            _field("check_date", "Date", "date"),
-            _field("outcome", "Outcome", "string"),
+            _field("compliance_type", "Compliance Type", "string"),
+            _field("reference_number", "Reference Number", "string"),
+            _field("effective_date", "Effective", "date"),
+            _field("expiry_date", "Expiry", "date"),
+            _field("status", "Status", "string"),
+            _field("is_current", "Current", "boolean"),
+            _field("is_mandatory", "Mandatory", "boolean"),
+            _field("verification_status", "Verification Status", "string"),
         ],
     ),
     "activation-readiness": Source(
         key="activation-readiness", label="Activation Readiness", collection="__virtual_activation__",
         fields=[
-            _field("driver_id", "Driver ID", "string"),
-            _field("driver_full_name", "Driver", "string"),
-            _field("readiness", "Readiness", "string"),
-            _field("complete_count", "Complete", "number"),
-            _field("missing_count", "Missing", "number"),
+            _field("driver_id", "Driver ID", "string", derived=True),
+            _field("driver_full_name", "Driver", "string", derived=True),
+            _field("readiness", "Readiness", "string", derived=True),
+            _field("complete_count", "Complete", "number", derived=True),
+            _field("missing_count", "Missing", "number", derived=True),
         ],
         archive_field=None,
     ),
@@ -219,8 +249,6 @@ REPORT_SOURCES: Dict[str, Source] = {
             _field("document_type", "Type", "string"),
             _field("sensitivity", "Sensitivity", "string"),
             _field("status", "Status", "string"),
-            _field("entity_type", "Entity Type", "string"),
-            _field("entity_id", "Entity ID", "string"),
             _field("created_at", "Created", "date"),
         ],
     ),
@@ -309,6 +337,9 @@ def _validate_request(req: RunRequest, role: str) -> Tuple[Source, List[Field_]]
             raise HTTPException(status_code=400, detail=f"Unknown filter field '{flt.field}'")
         if f.key not in visible:
             raise HTTPException(status_code=403, detail=f"Role not permitted to filter on '{f.key}'")
+        if not f.filterable:
+            raise HTTPException(status_code=400,
+                                 detail=f"Field '{f.key}' is not filterable")
         allowed_ops = OPS_BY_TYPE.get(f.type, set())
         if flt.operator not in allowed_ops:
             raise HTTPException(status_code=400,
@@ -433,16 +464,21 @@ async def _company_name_cache(db) -> Dict[str, str]:
 
 
 def _resolve_display(row: Dict[str, Any], selected_keys: List[str], companies: Dict[str, str]) -> Dict[str, Any]:
-    """When company_id is selected, replace the value with the resolved
-    Company name (fallback company_ref then blank). Original id is not
-    returned unless explicitly requested elsewhere."""
+    """Populate the derived ``company_name`` display field.
+
+    Canonical stored ``company_id`` is returned unchanged (raw UUID). The
+    derived ``company_name`` is resolved server-side from the Companies
+    cache with ``company_ref`` as a legacy fallback. No canonical row is
+    mutated."""
     out = {k: row.get(k) for k in selected_keys}
-    if "company_id" in out:
-        cid = out.get("company_id")
+    if "company_name" in out:
+        cid = row.get("company_id")
         if cid and cid in companies:
-            out["company_id"] = companies[cid]
-        elif not cid and row.get("company_ref"):
-            out["company_id"] = row["company_ref"]
+            out["company_name"] = companies[cid]
+        elif row.get("company_ref"):
+            out["company_name"] = row["company_ref"]
+        else:
+            out["company_name"] = None
     return out
 
 
@@ -532,7 +568,7 @@ def build_router(db, get_current_user):
         rows = await _fetch_rows(db, src, selected, req, role, limit + 1)
         truncated = len(rows) > limit
         rows = rows[:limit]
-        companies = await _company_name_cache(db) if any(f.key == "company_id" for f in selected) else {}
+        companies = await _company_name_cache(db) if any(f.key == "company_name" for f in selected) else {}
         display_rows = [_resolve_display(r, [f.key for f in selected], companies) for r in rows]
         return {
             "source": src.key,
@@ -574,7 +610,7 @@ def build_router(db, get_current_user):
         # bounded export scan
         limit = min(MAX_EXPORT_ROWS, MAX_EXPORT_ROWS)
         rows = await _fetch_rows(db, src, selected, payload, role, limit)
-        companies = await _company_name_cache(db) if any(f.key == "company_id" for f in selected) else {}
+        companies = await _company_name_cache(db) if any(f.key == "company_name" for f in selected) else {}
         display_rows = [_resolve_display(r, [f.key for f in selected], companies) for r in rows]
         if fmt == "csv":
             data = _build_csv(display_rows, selected)

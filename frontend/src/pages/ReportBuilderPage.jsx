@@ -124,7 +124,7 @@ export default function ReportBuilderPage() {
                 <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1 flex justify-between items-center">
                   <span>3 · Filters</span>
                   <button className="text-xs text-slate-600 underline" data-testid="rb-add-filter"
-                          onClick={() => setFilters([...filters, { field: fields[0]?.key || "", operator: "equals", value: "" }])}>
+                          onClick={() => setFilters([...filters, { field: fields.find((f) => f.filterable !== false)?.key || "", operator: "equals", value: "" }])}>
                     + Add
                   </button>
                 </div>
@@ -136,7 +136,7 @@ export default function ReportBuilderPage() {
                       <select className="text-xs border rounded px-1 py-1"
                               value={flt.field}
                               onChange={(e) => { const c = [...filters]; c[i].field = e.target.value; setFilters(c); }}>
-                        {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                        {fields.filter((f) => f.filterable !== false).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                       </select>
                       <select className="text-xs border rounded px-1 py-1"
                               value={flt.operator}

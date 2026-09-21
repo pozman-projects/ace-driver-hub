@@ -2648,3 +2648,69 @@ Traced snapshot path: `POST /api/drivers/{id}/exports/profile-pdf` → `ExportSe
 staging only · main untouched · Production untouched · no ACE data migrated · Compliance/Allocator/ReadOnly cannot commit imports · Admin/Manager can · Compliance/Allocator/ReadOnly cannot access MR-07A sensitive values via Profile PDF (snapshot + PDF text both verified) · MR-07A remains canonical authority · MR-07B unchanged except correction of the pre-existing Import Commit drift · existing Driver PDF architecture preserved · StorageAdapter untouched · no MR-08B feature build started · no out-of-scope changes.
 
 **FUNCTIONAL CONFORMANCE: PASS**
+
+---
+## MR-08B-P2 · Canonical Company Manager + Default Company (feb-2026)
+
+Foundation for MR-08B. Introduces the canonical Company entity used across
+Driver / Owner / Vehicle / Equipment registers. Existing free-text
+`company_ref` remains as a legacy display mirror. No retroactive migration
+of historical rows. Report Builder / Theme / Skin still to come.
+
+### Owner-locked model (P2)
+- Single canonical Company store keyed by immutable `id`.
+- One global persisted Default Company (not per-user).
+- Default applies to **new** records only. Existing records are never rewritten.
+- Admin/Manager mutate. Compliance/Allocator/ReadOnly read only.
+- Default Company cannot be archived; another active Company must be selected first.
+
+### Files changed
+- **NEW** `backend/company_module.py` — canonical model + endpoints + seed + helpers (`resolve_default_company`, `resolve_company`, `apply_default_company_if_missing`, `validate_supplied_company`, `seed_company_registry`).
+- `backend/registers.py`
+  - Added `company_id: Optional[str] = None` to Driver/Owner/Vehicle/Equipment `Base` and `Update` models (8 spots).
+  - Applied `apply_default_company_if_missing` inside every CREATE handler.
+  - Applied `validate_supplied_company` inside every UPDATE handler (no default injection on UPDATE).
+- `backend/server.py`
+  - Registered `build_company_router`.
+  - Wired `seed_company_registry` after `mp_seed_rules`.
+- `frontend/src/App.js` — new route `/administration/companies` → `CompanyManagerPage`.
+- **NEW** `frontend/src/pages/CompanyManagerPage.jsx` — list · create · rename · archive · set default.
+- `frontend/src/components/driver-cc/AdminUtilitiesCard.jsx` — added "Company Manager" utility item (canManage only) at top of utilities list. Card layout unchanged.
+- **NEW** `backend/tests/test_mr08b_p2_company.py` — **27/27 pass** covering all 24 spec items.
+
+### Canonical endpoints
+- `GET /api/companies?include_archived=…`
+- `GET /api/companies/{id}`
+- `POST /api/companies` (Admin/Manager)
+- `PUT /api/companies/{id}` (Admin/Manager)
+- `DELETE /api/companies/{id}` (Admin/Manager, soft archive, blocked if is_default)
+- `GET /api/settings/default-company`
+- `PUT /api/settings/default-company` (Admin/Manager)
+
+### Idempotent seed
+Startup hook `seed_company_registry(db)` guarantees exactly one active "ACE Car Freighters" Company and sets it as Default when no default is currently configured. Idempotent across restarts.
+
+### Preservation
+- MR-07A: no changes to `SENSITIVE_ACCOUNT_FIELDS` or `permissions.py`. Driver account ABN and Company ABN remain distinct concepts.
+- MR-07B: no role matrix changes. Company administration uses Admin/Manager directly (matches locked `CAN_MANAGE_COMPANY = {Admin, Manager}` semantics from the audit).
+- MR-04 / MR-05 / MR-06 / MR-08A: untouched.
+- Existing PDF exports: display fallback logic unchanged. When `company_id` is present, downstream displays already resolve via `company_ref` mirror which is now written by the CREATE path.
+- Existing imports: `FieldSpec("company_ref", "Company")` retained; no breaking change to the import pipeline.
+
+### Test results
+- MR-08B-P2: **27/27 PASS**
+- MR-08B-P1: **13/13 PASS**
+- MR-07A: **27/27 PASS**
+- MR-07B: **68/68 PASS**
+- Combined regression: **135/135 PASS**
+
+### STOP / DEFERRED
+- No retroactive migration of legacy `company_ref` values.
+- No import fuzzy-name-to-company_id normalisation (deferred to a future MR-08B-Px if Blueprint requires it).
+- Company branding / logo / theming remains deferred to MR-08B-P4 (Skin).
+
+### Confirmations
+staging only · main untouched · Production untouched · no real ACE data migrated · one canonical Company source · immutable Company ID is canonical reference · `company_ref` preserved for legacy compatibility · no retroactive company migration · Default Company affects new records only · changing Default never rewrites existing records · archived Company cannot be selected for new records · Default Company cannot be archived · no Theme/Skin built · no Report Builder built · MR-07A unchanged · MR-07B unchanged · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: PASS**

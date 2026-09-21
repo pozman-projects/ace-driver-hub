@@ -162,6 +162,11 @@ class DriverBase(BaseModel):
     start_date: Optional[str] = None
     driver_status: DriverStatus = DriverStatus.Active
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
+    # MR-08B-P2 · Immutable canonical Company reference. When omitted at
+    # create-time the current Default Company is applied automatically.
+    # ``company_ref`` remains as a legacy display mirror only.
+    company_id: Optional[str] = None
     business_name: Optional[str] = None
     abn: Optional[str] = None
     payroll_number: Optional[str] = None
@@ -206,6 +211,7 @@ class DriverUpdate(BaseModel):
     start_date: Optional[str] = None
     driver_status: Optional[DriverStatus] = None
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
     business_name: Optional[str] = None
     abn: Optional[str] = None
     payroll_number: Optional[str] = None
@@ -245,6 +251,7 @@ class OwnerBase(BaseModel):
     business_address: Optional[str] = None
     owner_status: OwnerStatus = OwnerStatus.Active
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
 
 
 class OwnerCreate(OwnerBase):
@@ -263,6 +270,7 @@ class OwnerUpdate(BaseModel):
     business_address: Optional[str] = None
     owner_status: Optional[OwnerStatus] = None
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
     is_archived: Optional[bool] = None
 
 
@@ -287,6 +295,7 @@ class VehicleBase(BaseModel):
     # through VehicleCreate / VehicleUpdate which enforce the canonical enum.
     vehicle_status: Optional[str] = VehicleStatus.Active.value
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
 
 
 class VehicleCreate(VehicleBase):
@@ -310,6 +319,7 @@ class VehicleUpdate(BaseModel):
     owner_id: Optional[str] = None
     vehicle_status: Optional[str] = None
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
     is_archived: Optional[bool] = None
 
     @field_validator("vehicle_status")
@@ -332,6 +342,7 @@ class EquipmentBase(BaseModel):
     owner_id: Optional[str] = None
     equipment_status: EquipmentStatus = EquipmentStatus.Available
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
 
 
 class EquipmentCreate(EquipmentBase):
@@ -347,6 +358,7 @@ class EquipmentUpdate(BaseModel):
     owner_id: Optional[str] = None
     equipment_status: Optional[EquipmentStatus] = None
     company_ref: Optional[str] = None
+    company_id: Optional[str] = None  # MR-08B-P2 canonical Company reference
     is_archived: Optional[bool] = None
 
 
@@ -748,12 +760,15 @@ def build_registers_router(db, get_current_user):
         await _ensure_unique_dispatch(db, payload.dispatch_number)
         now = _iso_now()
         doc = payload.model_dump()
+        # MR-08B-P2 · Resolve/apply canonical Company on create.
+        from company_module import apply_default_company_if_missing
+        doc = await apply_default_company_if_missing(db, doc)
         # legacy mirror for compat with existing readers (Driver Profile page etc)
         doc.setdefault("name", payload.full_name)
         doc.setdefault("driver_number", payload.driver_code or "")
         doc.setdefault("phone", payload.mobile_number or "")
         doc.setdefault("status", payload.driver_status.value if hasattr(payload.driver_status, 'value') else payload.driver_status)
-        doc.setdefault("company", payload.company_ref or "")
+        doc.setdefault("company", doc.get("company_ref") or "")
         doc.update(
             {
                 "id": str(uuid.uuid4()),
@@ -796,6 +811,9 @@ def build_registers_router(db, get_current_user):
             await _ensure_unique(db, DRIVERS_COLL, "driver_code", updates["driver_code"], exclude_id=driver_id)
         if "dispatch_number" in updates:
             await _ensure_unique_dispatch(db, updates["dispatch_number"], exclude_id=driver_id)
+        # MR-08B-P2 · Validate supplied Company but never inject default.
+        from company_module import validate_supplied_company
+        await validate_supplied_company(db, updates)
         # MR-07B-FIX · Driver transition INTO Active is an activation authority
         # action (Admin/Manager only). Allocator's SETUP permission covers
         # non-Active transitions; it must NOT include the Active transition.
@@ -988,6 +1006,9 @@ def build_registers_router(db, get_current_user):
         _require_master_write(current, "an Owner")
         now = _iso_now()
         doc = payload.model_dump()
+        # MR-08B-P2 · Resolve/apply canonical Company on create.
+        from company_module import apply_default_company_if_missing
+        doc = await apply_default_company_if_missing(db, doc)
         doc.update(
             {
                 "id": str(uuid.uuid4()),
@@ -1009,6 +1030,9 @@ def build_registers_router(db, get_current_user):
         if not existing:
             raise HTTPException(status_code=404, detail="Owner not found")
         updates = {k: v for k, v in payload.model_dump(exclude_unset=True).items()}
+        # MR-08B-P2 · Validate supplied Company but never inject default.
+        from company_module import validate_supplied_company
+        await validate_supplied_company(db, updates)
         updates["updated_at"] = _iso_now()
         updates["updated_by"] = current.get("email")
         await db[OWNERS_COLL].update_one({"id": owner_id}, {"$set": updates})
@@ -1053,6 +1077,9 @@ def build_registers_router(db, get_current_user):
         await _ensure_owner_exists(db, payload.owner_id)
         now = _iso_now()
         doc = payload.model_dump()
+        # MR-08B-P2 · Resolve/apply canonical Company on create.
+        from company_module import apply_default_company_if_missing
+        doc = await apply_default_company_if_missing(db, doc)
         doc.update(
             {
                 "id": str(uuid.uuid4()),
@@ -1080,6 +1107,9 @@ def build_registers_router(db, get_current_user):
             await _ensure_unique(db, VEHICLES_COLL, "vin", updates["vin"], exclude_id=vehicle_id)
         if "owner_id" in updates:
             await _ensure_owner_exists(db, updates["owner_id"])
+        # MR-08B-P2 · Validate supplied Company but never inject default.
+        from company_module import validate_supplied_company
+        await validate_supplied_company(db, updates)
         updates["updated_at"] = _iso_now()
         updates["updated_by"] = current.get("email")
         await db[VEHICLES_COLL].update_one({"id": vehicle_id}, {"$set": updates})
@@ -1124,6 +1154,9 @@ def build_registers_router(db, get_current_user):
         await _ensure_owner_exists(db, payload.owner_id)
         now = _iso_now()
         doc = payload.model_dump()
+        # MR-08B-P2 · Resolve/apply canonical Company on create.
+        from company_module import apply_default_company_if_missing
+        doc = await apply_default_company_if_missing(db, doc)
         doc.update(
             {
                 "id": str(uuid.uuid4()),
@@ -1149,6 +1182,9 @@ def build_registers_router(db, get_current_user):
             await _ensure_unique(db, EQUIPMENT_COLL, "equipment_number", updates["equipment_number"], exclude_id=equipment_id)
         if "owner_id" in updates:
             await _ensure_owner_exists(db, updates["owner_id"])
+        # MR-08B-P2 · Validate supplied Company but never inject default.
+        from company_module import validate_supplied_company
+        await validate_supplied_company(db, updates)
         updates["updated_at"] = _iso_now()
         updates["updated_by"] = current.get("email")
         await db[EQUIPMENT_COLL].update_one({"id": equipment_id}, {"$set": updates})

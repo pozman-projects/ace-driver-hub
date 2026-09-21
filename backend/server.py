@@ -587,6 +587,9 @@ async def on_startup():
     from migration_prep_module import ensure_indexes as mp_ensure_indexes, seed_transform_rules as mp_seed_rules
     await mp_ensure_indexes(db)
     await mp_seed_rules(db)
+    # MR-08B-P2 · Idempotent Company seed + Default Company.
+    from company_module import seed_company_registry as _seed_companies
+    await _seed_companies(db)
     # --- EB-13 Private Object Storage ---
     from storage_module import ensure_indexes as st_ensure_indexes, seed_retention_policies as st_seed_policies
     await st_ensure_indexes(db)
@@ -664,6 +667,10 @@ app.include_router(build_activation_router(db, get_current_user))
 # --- EB-11 Driver Exports ---
 from driver_export_module import build_driver_export_router  # noqa: E402
 app.include_router(build_driver_export_router(db, get_current_user))
+
+# --- MR-08B-P2 · Company Manager + Default Company ---
+from company_module import build_router as build_company_router, seed_company_registry  # noqa: E402
+app.include_router(build_company_router(db, get_current_user))
 
 # --- EB-12 Migration Preparation ---
 from migration_prep_module import build_migration_prep_router  # noqa: E402

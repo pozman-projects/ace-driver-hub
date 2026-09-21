@@ -18,6 +18,7 @@ import ImportCentre from "./pages/ImportCentre";
 import ImportWizard from "./pages/ImportWizard";
 import NotificationsCentre from "./pages/NotificationsCentre";
 import NumberingAdmin from "./pages/NumberingAdmin";
+import CompanyManagerPage from "./pages/CompanyManagerPage";
 import DriverActivationPage from "./pages/DriverActivationPage";
 import ActivationTemplatesPage from "./pages/ActivationTemplatesPage";
 import ActivationTemplateDetailPage from "./pages/ActivationTemplateDetailPage";
@@ -153,6 +154,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <NumberingAdmin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/companies"
+              element={
+                <ProtectedRoute>
+                  <CompanyManagerPage />
                 </ProtectedRoute>
               }
             />

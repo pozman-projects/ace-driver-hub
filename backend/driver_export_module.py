@@ -38,6 +38,21 @@ from pypdf import PdfReader
 
 from driver_pdf_renderer import render_profile_pdf, render_start_sheet
 
+
+async def _load_brand(db) -> Optional[dict]:
+    """Load current Skin as a renderer-friendly brand dict. Any failure is
+    silent — PDF branding is best-effort per MR-08B-P4."""
+    try:
+        from appearance_module import load_skin, load_skin_logo_bytes
+        skin = await load_skin(db)
+        return {
+            "accent_colour": skin.get("accent_colour"),
+            "logo_bytes": await load_skin_logo_bytes(db, actor_email="system"),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # ── Collections ───────────────────────────────────────────────────────────────
 JOBS_COLL = "driver_export_jobs"
 VERSIONS_COLL = "driver_export_versions"
@@ -670,9 +685,9 @@ class ExportService:
             snapshot["version_number"] = version_number
 
             if export_type == EXPORT_TYPE_START_SHEET:
-                pdf_bytes = render_start_sheet(snapshot)
+                pdf_bytes = render_start_sheet(snapshot, brand=await _load_brand(self.db))
             else:
-                pdf_bytes = render_profile_pdf(snapshot)
+                pdf_bytes = render_profile_pdf(snapshot, brand=await _load_brand(self.db))
 
             # ---- validate PDF ----
             reader = PdfReader_from_bytes(pdf_bytes)

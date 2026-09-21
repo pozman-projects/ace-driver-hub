@@ -676,6 +676,10 @@ app.include_router(build_company_router(db, get_current_user))
 from report_builder_module import build_router as build_reports_router  # noqa: E402
 app.include_router(build_reports_router(db, get_current_user))
 
+# --- MR-08B-P4 · Appearance (Theme + Skin) ---
+from appearance_module import build_router as build_appearance_router  # noqa: E402
+app.include_router(build_appearance_router(db, get_current_user))
+
 # --- EB-12 Migration Preparation ---
 from migration_prep_module import build_migration_prep_router  # noqa: E402
 app.include_router(build_migration_prep_router(db, get_current_user))

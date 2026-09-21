@@ -114,24 +114,67 @@ def _label_value(label: str, value: Any) -> List[Any]:
 
 
 # ---- header/footer -----------------------------------------------------------
-def _make_page_decorators(snapshot: Dict[str, Any], subtitle: str):
+def _resolve_brand_accent(brand: Optional[Dict[str, Any]]) -> Any:
+    """Return a reportlab colour for the header accent. Skin misconfiguration
+    must NEVER break PDF generation — always fall back to BRAND_ACCENT."""
+    if not brand:
+        return BRAND_ACCENT
+    hex_val = (brand.get("accent_colour") or "").strip()
+    if len(hex_val) == 7 and hex_val[0] == "#":
+        try:
+            return colors.HexColor(hex_val)
+        except Exception:  # noqa: BLE001
+            return BRAND_ACCENT
+    return BRAND_ACCENT
+
+
+def _brand_logo_image(brand: Optional[Dict[str, Any]]):
+    """Return a reportlab ImageReader for the Skin logo, or None if
+    unavailable/unreadable. Failures are silent — fallback to text mark."""
+    if not brand:
+        return None
+    raw = brand.get("logo_bytes")
+    if not raw:
+        return None
+    try:
+        from reportlab.lib.utils import ImageReader
+        return ImageReader(BytesIO(raw))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _make_page_decorators(snapshot: Dict[str, Any], subtitle: str,
+                            brand: Optional[Dict[str, Any]] = None):
     driver_name = snapshot.get("driver", {}).get("full_name") or NOT_RECORDED
     driver_code = snapshot.get("driver", {}).get("driver_code") or "—"
     verif = snapshot.get("verification_reference") or "—"
     gen_at = snapshot.get("generated_at") or ""
     version_no = snapshot.get("version_number") or 1
+    accent = _resolve_brand_accent(brand)
+    logo_img = _brand_logo_image(brand)
 
     def header_footer(canvas, doc):
         canvas.saveState()
         # Header band
         canvas.setFillColor(BRAND_DARK)
         canvas.rect(0, PAGE_H - 14 * mm, PAGE_W, 14 * mm, fill=1, stroke=0)
-        canvas.setFillColor(BRAND_ACCENT)
+        # Logo (if configured) sits at the left edge of the header band.
+        text_x = LEFT_MARGIN
+        if logo_img is not None:
+            try:
+                canvas.drawImage(logo_img,
+                                  LEFT_MARGIN, PAGE_H - 13 * mm,
+                                  width=12 * mm, height=12 * mm,
+                                  preserveAspectRatio=True, mask="auto")
+                text_x = LEFT_MARGIN + 14 * mm
+            except Exception:  # noqa: BLE001 — never block PDF on logo issues
+                text_x = LEFT_MARGIN
+        canvas.setFillColor(accent)
         canvas.setFont("Helvetica-Bold", 9)
-        canvas.drawString(LEFT_MARGIN, PAGE_H - 8 * mm, "ACE CAR FREIGHTERS")
+        canvas.drawString(text_x, PAGE_H - 8 * mm, "ACE CAR FREIGHTERS")
         canvas.setFillColor(colors.white)
         canvas.setFont("Helvetica-Bold", 10)
-        canvas.drawString(LEFT_MARGIN, PAGE_H - 11.5 * mm, subtitle)
+        canvas.drawString(text_x, PAGE_H - 11.5 * mm, subtitle)
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.HexColor("#94A3B8"))
         right_text = f"{driver_name} · {driver_code}"
@@ -251,7 +294,8 @@ def _section_heading(title: str) -> Table:
     return t
 
 
-def _build_doc(subtitle: str, snapshot: Dict[str, Any]) -> tuple:
+def _build_doc(subtitle: str, snapshot: Dict[str, Any],
+                brand: Optional[Dict[str, Any]] = None) -> tuple:
     buf = BytesIO()
     doc = BaseDocTemplate(
         buf, pagesize=A4,
@@ -265,7 +309,7 @@ def _build_doc(subtitle: str, snapshot: Dict[str, Any]) -> tuple:
         PAGE_H - TOP_MARGIN - BOTTOM_MARGIN,
         leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
     )
-    header_footer = _make_page_decorators(snapshot, subtitle)
+    header_footer = _make_page_decorators(snapshot, subtitle, brand=brand)
     doc.addPageTemplates([PageTemplate(id="ace", frames=[frame],
                                         onPage=header_footer)])
     return buf, doc
@@ -274,9 +318,10 @@ def _build_doc(subtitle: str, snapshot: Dict[str, Any]) -> tuple:
 # =============================================================================
 # START SHEET
 # =============================================================================
-def render_start_sheet(snapshot: Dict[str, Any]) -> bytes:
+def render_start_sheet(snapshot: Dict[str, Any],
+                        brand: Optional[Dict[str, Any]] = None) -> bytes:
     """Render the Driver Start Sheet (2-3 pages A4 portrait). Returns bytes."""
-    buf, doc = _build_doc("Driver Start Sheet", snapshot)
+    buf, doc = _build_doc("Driver Start Sheet", snapshot, brand=brand)
     story: List[Any] = []
     story.append(Spacer(1, 4 * mm))
 
@@ -558,9 +603,10 @@ def render_start_sheet(snapshot: Dict[str, Any]) -> bytes:
 # =============================================================================
 # PROFILE PDF
 # =============================================================================
-def render_profile_pdf(snapshot: Dict[str, Any]) -> bytes:
+def render_profile_pdf(snapshot: Dict[str, Any],
+                        brand: Optional[Dict[str, Any]] = None) -> bytes:
     """Render the full Driver Profile PDF (4-8 pages A4 portrait)."""
-    buf, doc = _build_doc("Driver Command Centre Profile", snapshot)
+    buf, doc = _build_doc("Driver Command Centre Profile", snapshot, brand=brand)
     story: List[Any] = []
     story.append(Spacer(1, 4 * mm))
 

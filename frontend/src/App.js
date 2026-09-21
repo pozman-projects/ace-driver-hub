@@ -20,6 +20,7 @@ import NotificationsCentre from "./pages/NotificationsCentre";
 import NumberingAdmin from "./pages/NumberingAdmin";
 import CompanyManagerPage from "./pages/CompanyManagerPage";
 import ReportBuilderPage from "./pages/ReportBuilderPage";
+import AppearancePage from "./pages/AppearancePage";
 import DriverActivationPage from "./pages/DriverActivationPage";
 import ActivationTemplatesPage from "./pages/ActivationTemplatesPage";
 import ActivationTemplateDetailPage from "./pages/ActivationTemplateDetailPage";
@@ -171,6 +172,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ReportBuilderPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/administration/appearance"
+              element={
+                <ProtectedRoute>
+                  <AppearancePage />
                 </ProtectedRoute>
               }
             />

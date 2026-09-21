@@ -2,62 +2,63 @@
 
 ## Original Problem Statement
 Execute strict "NO-DRIFT" Remediation Packages to bring the application into
-absolute alignment with Blueprint V1. Product Requirements:
-1. Complete Single-Source Blueprint V1 Activation Cutover (MR-04).
-2. Owner/Carrier/Relationship Editing (MR-05).
-3. Driver Code & Dispatch Numbering (MR-08A).
-4. Compliance Alerts & Notification Lifecycle (MR-06).
-5. Role Matrix & Permission Consistency (MR-07B).
-6. Reporting & Administration (MR-08B): Company Manager, Default Company,
-   Report Builder, Theme, Skin.
+absolute alignment with Blueprint V1.
+1. MR-04 · Single-Source Blueprint V1 Activation Cutover.
+2. MR-05 · Owner/Carrier/Relationship Editing.
+3. MR-06 · Compliance Alerts & Notification Lifecycle.
+4. MR-07 · Role Matrix & Permission Consistency.
+5. MR-08A · Driver Code & Dispatch Numbering.
+6. MR-08B · Reporting & Administration (Company Manager, Default Company,
+   Report Builder, **Theme scaffold**, **Global Skin**).
 
-## Latest Increment · MR-08B-P3-FIX (Feb 2026)
-Canonical field alignment of the Report Builder registry. All invalid
-stored-field aliases (Owners `trading_name/primary_email/primary_phone`,
-Equipment `status`, Vehicle Insurance `insurer/policy_type`, Vehicle
-Inspections `outcome/inspector`, Vehicle Defects `reported_at/resolved_at`,
-Equipment Compliance `check_type/check_date/outcome`, Documents
-`entity_type/entity_id`) removed or replaced with canonical Pydantic keys.
-Introduced explicit derived `company_name` field (display only, non
-filterable, non sortable). Canonical `company_id` now returns raw UUID.
-Vehicle Registration & Driver Licence gained additional canonical fields
-(`registration_number_snapshot`, `registration_class`, `issue_date`,
-`verification_status`).
+## Latest Increment · MR-08B-P4 (Feb 2026) · Theme scaffold + Global Skin
+- **Theme (per-user)** persisted in `user_preferences` keyed by canonical
+  `users.id`. Default = `light`. Dark preference persists but visual dark
+  palette is intentionally NOT applied — deferred to `MR-08B-P4-DARK` per
+  owner decision after STOP condition #2 was validly triggered
+  (69 hardcoded-light-utility files would produce a "half-dark" application).
+- **Skin (global)** persisted in `app_settings` under `key="skin"` with
+  strictly hex accent and a logo stored via the canonical StorageAdapter
+  (raw storage keys never exposed). Admin/Manager only for mutation; all
+  authenticated roles may read.
+- **PDF branding integration**: `driver_pdf_renderer` now accepts an
+  optional `brand={"accent_colour", "logo_bytes"}` and applies to header
+  band only. All PDF body content, MR-07A gating, versioning, checksum
+  and storage paths unchanged. Skin/logo failure falls back silently to
+  existing ACE text branding.
+- **Appearance page** at `/administration/appearance` with clearly
+  separated Theme and Skin sections. Section anchors `?section=theme` and
+  `?section=skin` supported.
+- **AdminUtilitiesCard** now exposes separate **Theme** and **Skin**
+  shortcuts (both link to the Appearance surface). Final exact-five card
+  ordering is deferred to `MR-08B-P5`.
 
-### Field capability model additions
-- `filterable: bool = True` on Field_.
-- `derived: bool = False` on Field_.
-- `_validate_request` rejects filters/sorts on non-filterable / non-sortable
-  fields with 400 (e.g. `company_name`).
-
-### Structural regression guard
-`TestFixStructuralRegistryAlignment` imports canonical Pydantic models and
-asserts every non-derived REPORT_SOURCES key exists on the canonical model.
-Prevents recurrence of invented stored-field keys.
+## Prior Increment · MR-08B-P3-FIX (Feb 2026)
+Report Builder canonical field alignment. Registry keys now match
+canonical Pydantic models across all 13 sources. Structural regression
+guard added to prevent recurrence.
 
 ## Test Coverage
-- MR-04B: 32
-- MR-05: 54
-- MR-06 urgent + notifications: 17 (test_mr06 slow — DB scan volume unrelated to P3-FIX)
-- MR-07A / MR-07B / MR-08B-P1 / MR-08B-P2: 135
+- MR-04B: 32 · MR-05: 54 · MR-07A/07B/08B-P1/08B-P2/08B-P3: 238
+- **MR-08B-P4: 32 (new)**
+- Driver Exports (EB-11): 28 · Documents (EB-05): 28 · Compliance (EB-04): 34
 - MR-08A: 45
-- **MR-08B-P3 (incl. FIX): 71 (was 30)**
-- Documents (EB-05): 28
-- Compliance (EB-04): 34
-
-Total curated regression: ~430 tests passing.
 
 ## Deferred / Backlog
-- `DriverBase.company_id` duplicate field declaration (cosmetic; no runtime
-  defect). Do NOT touch under MR-08B-P3-FIX scope.
-- `document_links` join for Documents source (V1 excludes joins).
-- MR-08B-P4: Theme / Skin. Awaiting owner decision.
-- MR-08B-P5: DCC Admin Card exact-five ordering.
+- **MR-08B-P4-DARK** — full application-wide visual dark palette across
+  app shell, DCC cards, registers, Report Builder, Company Manager, forms,
+  tables, badges, modals, auth, admin surfaces. Blocked here to prevent a
+  half-dark application.
+- **MR-08B-P5** — DCC Admin Card exact-five ordering + canonical Upload
+  Licence shortcut + Import/Export mock-up conformance.
 - Authoritative ACE data migration to Production.
-- Email / SMS / Scheduler policy enablement.
+- Email/SMS/Scheduler policy enablement.
+- Cosmetic: duplicate `company_id` declaration in `DriverBase`.
 
 ## Guardrails Honoured This Package
 staging only · main untouched · Production untouched · no real ACE data
 migrated · StorageAdapter unchanged · MR-07A unchanged · MR-07B unchanged
-· document sensitivity unchanged · no PDF reports · no saved reports · no
-Theme/Skin · no MR-08B-P4 · no domain schema mutation · no cross-source joins.
+· document sensitivity unchanged · no PDF body/content/permissions change
+· no partial dark UI · no per-Company Skin · no arbitrary CSS · no raw
+storage key exposure · Report Builder, Company Manager, Default Company,
+Activation, Compliance, Notifications, Numbering all unchanged.

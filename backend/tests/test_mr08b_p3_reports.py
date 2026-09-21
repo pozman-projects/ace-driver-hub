@@ -646,8 +646,9 @@ class TestFixCompanyIdVsName:
         tag = _tag()
         comp = self._make_company(admin, tag)
         comp_id, comp_name = comp["id"], comp["name"]
+        full_name = f"CompDriver {tag}"
         did = admin.post(f"{BASE_URL}/api/drivers",
-                          json={"full_name": f"CompDriver {tag}",
+                          json={"full_name": full_name,
                                 "driver_status": "Training",
                                 "company_id": comp_id,
                                 "company_ref": comp_name},
@@ -656,8 +657,9 @@ class TestFixCompanyIdVsName:
         r = admin.post(f"{BASE_URL}/api/reports/run",
                         json={"source": "drivers",
                               "fields": ["full_name", "company_id", "company_name"],
+                              "filters": [{"field": "full_name", "operator": "equals", "value": full_name}],
                               "limit": 1000}, timeout=45).json()
-        row = _find(r["rows"], "full_name", f"CompDriver {tag}")
+        row = _find(r["rows"], "full_name", full_name)
         assert row is not None
         assert row["company_id"] == comp_id, f"raw UUID expected, got {row['company_id']!r}"
         assert row["company_name"] == comp_name
@@ -665,8 +667,9 @@ class TestFixCompanyIdVsName:
     def test_legacy_company_ref_fallback_populates_company_name(self, admin):
         tag = _tag()
         legacy = f"Legacy ACE {tag}"
+        full_name = f"LegacyDriver {tag}"
         did = admin.post(f"{BASE_URL}/api/drivers",
-                          json={"full_name": f"LegacyDriver {tag}",
+                          json={"full_name": full_name,
                                 "driver_status": "Training",
                                 "company_ref": legacy},
                           timeout=15).json()["id"]
@@ -677,8 +680,9 @@ class TestFixCompanyIdVsName:
         r = admin.post(f"{BASE_URL}/api/reports/run",
                         json={"source": "drivers",
                               "fields": ["full_name", "company_id", "company_name"],
+                              "filters": [{"field": "full_name", "operator": "equals", "value": full_name}],
                               "limit": 1000}, timeout=45).json()
-        row = _find(r["rows"], "full_name", f"LegacyDriver {tag}")
+        row = _find(r["rows"], "full_name", full_name)
         assert row is not None
         assert row["company_id"] in (None, "")
         assert row["company_name"] == legacy

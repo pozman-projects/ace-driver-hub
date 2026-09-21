@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../../lib/api";
+import { loadGooglePlaces, isPlacesAvailable } from "../../lib/googlePlaces";
 import { ROLE_CAN_EDIT, ManagementCard, InlineField, EditInput } from "./driverCCUtils";
 import EvidenceActions from "./EvidenceActions";
 
@@ -63,6 +64,71 @@ function ProfilePhotoThumb({ documentId }) {
     />
   );
 }
+/**
+ * FA-03 · Residential-address input with Google Places autocomplete.
+ * Falls back to a plain text input when the key is missing or the API
+ * fails to load. Only ``place.formatted_address`` is persisted — no
+ * place_id, no coordinates, no raw Places response.
+ */
+function AddressAutocompleteInput({ value, onChange, testid }) {
+  const inputRef = useRef(null);
+  const acRef = useRef(null);
+  const [available, setAvailable] = useState(isPlacesAvailable());
+  const [attempted, setAttempted] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const places = await loadGooglePlaces();
+      if (cancelled) return;
+      setAttempted(true);
+      if (!places || !inputRef.current) { setAvailable(false); return; }
+      try {
+        acRef.current = new places.Autocomplete(inputRef.current, {
+          types: ["address"],
+          componentRestrictions: { country: ["au"] },
+          fields: ["formatted_address"],
+        });
+        acRef.current.addListener("place_changed", () => {
+          const p = acRef.current?.getPlace();
+          const formatted = p?.formatted_address;
+          if (formatted) onChange(formatted);
+        });
+        setAvailable(true);
+      } catch { setAvailable(false); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="grid grid-cols-3 gap-2 items-start text-xs" data-testid="edit-residential-address-row">
+      <label htmlFor="edit-residential-address" className="col-span-1 text-slate-500 pt-1.5">
+        Residential Address
+      </label>
+      <div className="col-span-2">
+        <input
+          id="edit-residential-address"
+          ref={inputRef}
+          type="text"
+          value={value || ""}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-cyan-500"
+          data-testid={testid}
+          autoComplete="off"
+        />
+        {attempted && !available && (
+          <div className="text-[10px] text-slate-400 mt-0.5"
+               data-testid="address-autocomplete-unavailable">
+            Address suggestions unavailable
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 
 export default function DriverDetailsCard({ data, role, onSaved }) {
   const d = data.driver || {};
@@ -117,7 +183,7 @@ export default function DriverDetailsCard({ data, role, onSaved }) {
     >
       {editing ? (
         <>
-          <EditInput label="Residential Address" value={form.residential_address} onChange={(v) => setForm({ ...form, residential_address: v })} testid="edit-residential-address" />
+          <AddressAutocompleteInput value={form.residential_address} onChange={(v) => setForm({ ...form, residential_address: v })} testid="edit-residential-address" />
           <EditInput label="Mobile Number" value={form.mobile_number} onChange={(v) => setForm({ ...form, mobile_number: v })} testid="edit-mobile-number" />
           <EditInput label="Email" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} testid="edit-email" />
           <EditInput label="Emergency Name" value={form.emergency_contact_name} onChange={(v) => setForm({ ...form, emergency_contact_name: v })} testid="edit-emergency-name" />

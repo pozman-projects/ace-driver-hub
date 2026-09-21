@@ -22,7 +22,6 @@ function StatusBadge({ status }) {
 }
 
 export default function AdminUtilitiesCard({ driverId, role, data }) {
-  const canManage = ["Admin", "Manager"].includes(role);
   const canStart = ROLE_START.includes(role);
   const canProfile = ROLE_PROFILE.includes(role);
 
@@ -84,16 +83,27 @@ export default function AdminUtilitiesCard({ driverId, role, data }) {
   };
 
   const utilities = [
-    { key: "company", label: "Company Manager", to: "/administration/companies", available: canManage, testid: "util-company" },
     { key: "reports", label: "Report Builder", to: "/administration/reports", available: true, testid: "util-reports" },
-    { key: "theme", label: "Theme", to: "/administration/appearance?section=theme", available: true, testid: "util-theme" },
-    { key: "skin", label: "Skin", to: "/administration/appearance?section=skin", available: true, testid: "util-skin" },
     { key: "docs", label: "Open Document Library", to: `/documents?entity_type=Driver&entity_id=${driverId}`, available: true, testid: "util-open-docs" },
     { key: "upload", label: "Upload supporting document", to: `/documents?entity_type=Driver&entity_id=${driverId}&upload=1`, available: true, testid: "util-upload" },
-    { key: "imports", label: "Open Import Centre", to: "/imports", available: canManage, testid: "util-imports" },
     { key: "numbering", label: "Numbering admin", to: "/administration/numbering", available: true, testid: "util-numbering" },
     { key: "notifications", label: "Driver alerts", to: `/notifications/all?entity_type=Driver&entity_id=${driverId}`, available: true, testid: "util-notifications" },
   ];
+
+  // MR-08B-P5 · Focus the canonical Driver Licence card and invoke its
+  // existing EvidenceActions upload button. No new uploader is introduced.
+  const openLicenceUpload = () => {
+    const card = document.querySelector('[data-section="licence"]');
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    // The canonical upload / replace button lives inside EvidenceActions on
+    // the DriverLicenceCard. Only one of them is rendered depending on
+    // whether an evidence document already exists.
+    setTimeout(() => {
+      const btn = document.querySelector('[data-testid="ci-licence-ev-upload"]')
+        || document.querySelector('[data-testid="ci-licence-ev-replace"]');
+      if (btn) btn.click();
+    }, 350);
+  };
 
   const readiness = data?.activation?.readiness;
   const activeOverrideCount = data?.activation?.override ? 1 : 0;
@@ -193,7 +203,66 @@ export default function AdminUtilitiesCard({ driverId, role, data }) {
         </div>
       )}
 
-      <ul className="space-y-1.5">
+      {/* MR-08B-P5 · Approved mock-up primary five */}
+      <div className="mb-3" data-testid="admin-primary-five">
+        <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1.5">
+          Settings & Admin
+        </div>
+        <ul className="space-y-1">
+          <li>
+            <Link to="/administration/companies"
+                  data-testid="admin-primary-company"
+                  className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50 px-2.5 py-1.5 text-xs font-medium text-slate-800">
+              <span className="inline-flex items-center gap-1.5"><CaretRight size={11} /> Company</span>
+            </Link>
+          </li>
+          <li>
+            <div data-testid="admin-primary-import-export"
+                 className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-800">
+              <span className="inline-flex items-center gap-1.5"><CaretRight size={11} /> Import / Export</span>
+              <span className="inline-flex items-center gap-1">
+                <Link to="/imports" data-testid="admin-primary-import"
+                      className="text-[11px] px-2 py-0.5 rounded border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50 text-cyan-700">
+                  Import
+                </Link>
+                <Link to="/administration/reports" data-testid="admin-primary-export"
+                      className="text-[11px] px-2 py-0.5 rounded border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50 text-cyan-700">
+                  Export
+                </Link>
+              </span>
+            </div>
+          </li>
+          <li>
+            <button type="button" onClick={openLicenceUpload}
+                    data-testid="admin-primary-upload-licence"
+                    className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50 px-2.5 py-1.5 text-xs font-medium text-slate-800">
+              <span className="inline-flex items-center gap-1.5"><CaretRight size={11} /> Upload Licence</span>
+            </button>
+          </li>
+          <li>
+            <Link to="/administration/appearance?section=theme"
+                  data-testid="admin-primary-theme"
+                  className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50 px-2.5 py-1.5 text-xs font-medium text-slate-800">
+              <span className="inline-flex items-center gap-1.5"><CaretRight size={11} /> Theme</span>
+            </Link>
+          </li>
+          <li>
+            <Link to="/administration/appearance?section=skin"
+                  data-testid="admin-primary-skin"
+                  className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 hover:border-cyan-400 hover:bg-cyan-50 px-2.5 py-1.5 text-xs font-medium text-slate-800">
+              <span className="inline-flex items-center gap-1.5"><CaretRight size={11} /> Skin</span>
+            </Link>
+          </li>
+        </ul>
+      </div>
+
+      <div className="border-t border-slate-200 mt-2 mb-2" data-testid="admin-primary-divider" />
+
+      <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1.5"
+           data-testid="admin-secondary-heading">
+        Other utilities
+      </div>
+      <ul className="space-y-1.5" data-testid="admin-secondary-utilities">
         {utilities.filter(u => u.available).map((u) => (
           <li key={u.key}>
             <Link to={u.to} data-testid={u.testid} className="text-sm text-cyan-700 hover:underline inline-flex items-center gap-1">

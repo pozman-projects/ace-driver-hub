@@ -2,63 +2,56 @@
 
 ## Original Problem Statement
 Execute strict "NO-DRIFT" Remediation Packages to bring the application into
-absolute alignment with Blueprint V1.
-1. MR-04 · Single-Source Blueprint V1 Activation Cutover.
-2. MR-05 · Owner/Carrier/Relationship Editing.
-3. MR-06 · Compliance Alerts & Notification Lifecycle.
-4. MR-07 · Role Matrix & Permission Consistency.
-5. MR-08A · Driver Code & Dispatch Numbering.
-6. MR-08B · Reporting & Administration (Company Manager, Default Company,
-   Report Builder, **Theme scaffold**, **Global Skin**).
+absolute alignment with Blueprint V1 and the approved Dan Murgo mock-up.
 
-## Latest Increment · MR-08B-P4 (Feb 2026) · Theme scaffold + Global Skin
-- **Theme (per-user)** persisted in `user_preferences` keyed by canonical
-  `users.id`. Default = `light`. Dark preference persists but visual dark
-  palette is intentionally NOT applied — deferred to `MR-08B-P4-DARK` per
-  owner decision after STOP condition #2 was validly triggered
-  (69 hardcoded-light-utility files would produce a "half-dark" application).
-- **Skin (global)** persisted in `app_settings` under `key="skin"` with
-  strictly hex accent and a logo stored via the canonical StorageAdapter
-  (raw storage keys never exposed). Admin/Manager only for mutation; all
-  authenticated roles may read.
-- **PDF branding integration**: `driver_pdf_renderer` now accepts an
-  optional `brand={"accent_colour", "logo_bytes"}` and applies to header
-  band only. All PDF body content, MR-07A gating, versioning, checksum
-  and storage paths unchanged. Skin/logo failure falls back silently to
-  existing ACE text branding.
-- **Appearance page** at `/administration/appearance` with clearly
-  separated Theme and Skin sections. Section anchors `?section=theme` and
-  `?section=skin` supported.
-- **AdminUtilitiesCard** now exposes separate **Theme** and **Skin**
-  shortcuts (both link to the Appearance surface). Final exact-five card
-  ordering is deferred to `MR-08B-P5`.
+## Latest Increment · MR-08B-P5 (Feb 2026) · Final DCC Admin card mock-up conformance
+- The Administration & Utilities card now presents the approved primary five
+  in exact visible order **BEFORE** a divider, followed by "Other utilities":
+  1. **Company** → `/administration/companies` (MR-08B-P2)
+  2. **Import / Export** → single row exposing two compact actions
+     · **Import** → `/imports` (canonical Import Centre)
+     · **Export** → `/administration/reports` (MR-08B-P3 Report Builder)
+  3. **Upload Licence** → focuses `[data-section="licence"]` and invokes
+     the existing canonical `EvidenceActions` upload/replace control on
+     `DriverLicenceCard`. No duplicate uploader created. No new endpoint.
+  4. **Theme** → `/administration/appearance?section=theme` (MR-08B-P4)
+  5. **Skin** → `/administration/appearance?section=skin` (MR-08B-P4)
+- Retained "Other utilities" below the divider: Report Builder shortcut,
+  Document Library, Upload supporting document, Numbering admin, Driver
+  alerts. Existing PDF generation buttons and Export History unchanged.
+- Duplicates removed from the secondary utilities list: Company (now
+  primary), Import Centre (now primary), Theme (now primary), Skin (now
+  primary). Report Builder shortcut deliberately retained per locked owner
+  decision.
 
-## Prior Increment · MR-08B-P3-FIX (Feb 2026)
-Report Builder canonical field alignment. Registry keys now match
-canonical Pydantic models across all 13 sources. Structural regression
-guard added to prevent recurrence.
+## Prior Increments
+- **MR-08B-P4** — Theme scaffold (per-user light/dark persisted; dark
+  visual application deferred to MR-08B-P4-DARK) + Global Skin (accent
+  colour, StorageAdapter-backed PNG/JPEG logo, PDF branding integration
+  with graceful fallback).
+- **MR-08B-P3-FIX** — Report Builder canonical field alignment + structural
+  recurrence guard.
+- MR-08B-P1/P2/P3 base packages: Import commit lock, Company Manager +
+  Default Company, canonical Report Builder.
+- MR-04B, MR-05, MR-06, MR-07A/B, MR-08A.
 
 ## Test Coverage
-- MR-04B: 32 · MR-05: 54 · MR-07A/07B/08B-P1/08B-P2/08B-P3: 238
-- **MR-08B-P4: 32 (new)**
-- Driver Exports (EB-11): 28 · Documents (EB-05): 28 · Compliance (EB-04): 34
-- MR-08A: 45
+- MR-07B / MR-08B-P1..P5 combined: **266 / 266 green**
+- Driver Exports (EB-11): **28 / 28 green** — branding hook non-regressive.
+- Compliance (EB-04): **34 / 34 green** — licence evidence workflow untouched.
+- Cumulative recent-suite pytest run (P3/P4/P5 + supporting): **301 / 301 green**.
 
 ## Deferred / Backlog
 - **MR-08B-P4-DARK** — full application-wide visual dark palette across
-  app shell, DCC cards, registers, Report Builder, Company Manager, forms,
-  tables, badges, modals, auth, admin surfaces. Blocked here to prevent a
-  half-dark application.
-- **MR-08B-P5** — DCC Admin Card exact-five ordering + canonical Upload
-  Licence shortcut + Import/Export mock-up conformance.
+  ~69 files. Explicitly deferred; NOT started here.
 - Authoritative ACE data migration to Production.
 - Email/SMS/Scheduler policy enablement.
 - Cosmetic: duplicate `company_id` declaration in `DriverBase`.
 
 ## Guardrails Honoured This Package
 staging only · main untouched · Production untouched · no real ACE data
-migrated · StorageAdapter unchanged · MR-07A unchanged · MR-07B unchanged
-· document sensitivity unchanged · no PDF body/content/permissions change
-· no partial dark UI · no per-Company Skin · no arbitrary CSS · no raw
-storage key exposure · Report Builder, Company Manager, Default Company,
-Activation, Compliance, Notifications, Numbering all unchanged.
+migrated · MR-07A unchanged · MR-07B unchanged · MR-08B-P1..P4 locks
+unchanged · Report Builder unchanged · Company Manager unchanged · Theme
+persistence unchanged · Skin storage unchanged · no duplicate uploader ·
+no duplicate import/export engine · no new backend routes · no dark
+visual mode · no MR-08B-P4-DARK · DCC macro layout unchanged.

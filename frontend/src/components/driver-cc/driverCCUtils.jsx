@@ -8,8 +8,35 @@ import { Link } from "react-router-dom";
 import { PencilSimple } from "@phosphor-icons/react";
 
 // ── Role gates ───────────────────────────────────────────────────────────────
+// MR-07B canonical frontend capabilities. Backend remains the enforcement
+// authority; these mirrors decide UI visibility only. Do NOT rely on these
+// for security.
 export const ROLE_CAN_EDIT_ACCOUNT = new Set(["Admin", "Manager"]);
-export const ROLE_CAN_EDIT = new Set(["Admin", "Manager", "Allocator"]);
+// General DCC master-data editing (Driver core / Owner / Vehicle / Carrier).
+// Compliance and Allocator are excluded — Compliance never edits master data,
+// Allocator uses the assignment/setup-specific capabilities below.
+export const ROLE_CAN_EDIT_MASTER = new Set(["Admin", "Manager"]);
+// Driver setup fields Allocator may edit (status transitions, comms, etc.).
+export const ROLE_CAN_EDIT_SETUP = new Set(["Admin", "Manager", "Allocator"]);
+// Compliance evidence editing (Licence / Registration / Insurance …).
+export const ROLE_CAN_EDIT_COMPLIANCE = new Set(["Admin", "Manager", "Compliance"]);
+// Driver ↔ Vehicle / Driver ↔ Equipment operational assignment.
+export const ROLE_CAN_ASSIGN_VEHICLE = new Set(["Admin", "Manager", "Allocator"]);
+// Legacy alias — retained for existing card imports. Points at the
+// master-data capability. Cards that need finer capabilities (Setup /
+// Compliance / Assignment) should import the specific set above.
+export const ROLE_CAN_EDIT = ROLE_CAN_EDIT_MASTER;
+
+export function capability(role) {
+  return {
+    canEditAccount: ROLE_CAN_EDIT_ACCOUNT.has(role),
+    canEditMaster: ROLE_CAN_EDIT_MASTER.has(role),
+    canEditSetup: ROLE_CAN_EDIT_SETUP.has(role),
+    canEditCompliance: ROLE_CAN_EDIT_COMPLIANCE.has(role),
+    canAssignVehicle: ROLE_CAN_ASSIGN_VEHICLE.has(role),
+    canWrite: role && role !== "ReadOnly",
+  };
+}
 
 // ── Status helpers ───────────────────────────────────────────────────────────
 export function statusVariant(status) {

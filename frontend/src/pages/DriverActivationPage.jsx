@@ -22,7 +22,8 @@ export default function DriverActivationPage() {
   const canActivate = ["Admin", "Manager"].includes(role);
   const canApproveOverride = ["Admin", "Manager"].includes(role);
   const canRequestOverride = ["Admin", "Manager", "Allocator", "Compliance"].includes(role);
-  const canManual = role !== "ReadOnly";
+  // MR-07B · Manual activation-item completion is an activation-authority action.
+  const canManual = ["Admin", "Manager"].includes(role);
 
   const [data, setData] = useState(null);
   const [driver, setDriver] = useState(null);

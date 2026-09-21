@@ -1,12 +1,12 @@
 import React from "react";
-import { RightCard, StatusPill, InlineField, ROLE_CAN_EDIT } from "./driverCCUtils";
+import { RightCard, StatusPill, InlineField, ROLE_CAN_EDIT_COMPLIANCE } from "./driverCCUtils";
 import EvidenceActions from "./EvidenceActions";
 
 export default function TruckInsuranceCard({ data, role, onSaved }) {
   const i = data.primary_insurance;
   const s = (data.compliance_intelligence?.vehicle_summary?.components || []).find((c) => c.component === "insurance");
   const evidence = data.documents?.insurance_evidence || null;
-  const canEdit = ROLE_CAN_EDIT.has(role);
+  const canEdit = ROLE_CAN_EDIT_COMPLIANCE.has(role);
   return (
     <RightCard title="Truck Insurance" testid="ci-insurance" section="insurance">
       {i ? (

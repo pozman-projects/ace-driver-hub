@@ -1,10 +1,10 @@
 import React, { useRef, useState } from "react";
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../../lib/api";
-import { ROLE_CAN_EDIT, ManagementCard, InlineField, EditInput, ToggleRow } from "./driverCCUtils";
+import { ROLE_CAN_EDIT_SETUP, ManagementCard, InlineField, EditInput, ToggleRow } from "./driverCCUtils";
 
 export default function CommunicationCard({ data, role, driverId, onSaved }) {
-  const canEdit = ROLE_CAN_EDIT.has(role);
+  const canEdit = ROLE_CAN_EDIT_SETUP.has(role);
   const prefs = data.communication_preferences;
   const driverEmail = data.driver?.email;
   const ownerEmail = data.owner?.contact_email || data.owner?.email;

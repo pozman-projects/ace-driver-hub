@@ -2479,3 +2479,59 @@ authority (`_classify_expiry`) unchanged. No new severity vocabulary. No live de
 staging only · main untouched · Production untouched · canonical thresholds unchanged · `_classify_expiry` reused · Compliance Urgent event added · Urgent severity=High · Urgent repeat=24h · Urgent escalation levels=[] · Due Soon resolves on Urgent · Urgent resolves when source leaves Urgent · history preserved · no live scheduler / Email / SMS enabled · no Activation changes · no numbering changes · no Owner/Carrier changes · no role changes · no out-of-scope changes.
 
 **FUNCTIONAL CONFORMANCE: PASS**
+
+---
+## MR-07B-IMPL · Canonical Role Matrix Enforcement (feb-2026)
+
+### Scope
+Owner-locked role matrix implemented backend-first. Single canonical policy
+module (`backend/role_matrix.py`) replaces six ad-hoc `_require_write_role`
+helpers that previously allowed "everyone except ReadOnly" for canonical writes.
+Frontend `driverCCUtils.jsx` mirrors the matrix with specific capability sets.
+Roles unchanged (Admin/Manager/Compliance/Allocator/ReadOnly). No Accounts role added.
+
+### Owner-locked matrix (canonical)
+Driver core, Owner, Vehicle, Equipment master data · **Admin/Manager only**.
+Driver setup fields (status non-Active, start_date, driver_code, dispatch_number) · **Admin/Manager/Allocator**.
+Driver↔Vehicle & Driver↔Equipment assignment · **Admin/Manager/Allocator**.
+Vehicle↔Equipment coupling (master physical) · **Admin/Manager only**.
+Compliance evidence (Licence/Rego/Insurance/Inspection/Defect/Maintenance/EqComp) · **Admin/Manager/Compliance** — Allocator now denied.
+Document metadata · sensitivity-gated (Standard/Internal/Confidential = Admin/Manager/Compliance; Restricted = Admin/Manager). Allocator denied metadata.
+Document review (approve/reject) · new minimal endpoint `POST /api/documents/{id}/review` with same sensitivity gate.
+Notifications · reopen now includes Compliance. Manual resolve unchanged (Admin/Manager/Compliance).
+Numbering · write Admin/Manager/Allocator (Compliance denied). Audit Admin/Manager only. Sequence Admin only.
+Activation · unchanged (Admin/Manager activate/deactivate/approve; Admin/Manager/Allocator/Compliance may request override).
+Admin/Settings · user create, Storage admin, Automation admin = **Admin only**. Recovery, Migration commit = **Admin/Manager**.
+
+### Files changed
+- **NEW** `backend/role_matrix.py` — canonical CAN_* frozensets + `require()`/`has()`/`deny_readonly()` helpers + sensitivity-aware `can_edit_document_metadata()` / `can_review_document()`.
+- `backend/registers.py` — Driver/Owner/Vehicle/Equipment create/update now use `_require_master_write`. Driver PUT distinguishes CORE vs SETUP fields and routes to the correct gate; Compliance denied both.
+- `backend/relationships.py` — Driver↔Owner + Vehicle↔Equipment couplings now `_require_master_relationship_write` (Admin/Manager). Driver↔Vehicle + Driver↔Equipment now `_require_allocation_write` (Admin/Manager/Allocator).
+- `backend/compliance_records.py` — `_require_write` tightened to Admin/Manager/Compliance (Allocator denied). ReadOnly denied unchanged.
+- `backend/documents_module.py` — metadata edit gated by sensitivity via `can_edit_document_metadata`. New `POST /api/documents/{id}/review` route with sensitivity-aware role gate; records `reviewed_by`, `reviewed_at`, `review_note`, `review_decision`; status → Active or Rejected.
+- `backend/notifications_module.py` — `reopen` allow-list adds Compliance.
+- `backend/numbering_module.py` — READ_ROLES narrowed to Admin/Manager/Allocator (Compliance denied numbering). Pool/audit endpoints tightened to Admin/Manager only. Sequence edit unchanged (Admin only).
+- `frontend/src/components/driver-cc/driverCCUtils.jsx` — added `ROLE_CAN_EDIT_MASTER`, `ROLE_CAN_EDIT_SETUP`, `ROLE_CAN_EDIT_COMPLIANCE`, `ROLE_CAN_ASSIGN_VEHICLE`, `capability(role)`. `ROLE_CAN_EDIT` alias now points at `ROLE_CAN_EDIT_MASTER` (Admin/Manager) — reflects the owner-locked frontend visibility change for master-data cards.
+- `frontend/src/components/driver-cc/DriverLicenceCard.jsx`, `TruckRegistrationCard.jsx`, `TruckInsuranceCard.jsx` — switched to `ROLE_CAN_EDIT_COMPLIANCE` (Compliance now visible/editable).
+- `frontend/src/components/driver-cc/DriverSetupCard.jsx`, `CommunicationCard.jsx` — switched to `ROLE_CAN_EDIT_SETUP` (Allocator retains edit, Compliance hidden).
+- `frontend/src/pages/DriverActivationPage.jsx` — `canManual` tightened to Admin/Manager.
+- `backend/tests/test_mr07a_permissions.py` — one MR-07A test refreshed: `test_non_privileged_can_still_update_non_restricted_fields[compliance|allocator]` now asserts 403 (matches MR-07B).
+- **NEW** `backend/tests/test_mr07b_permissions.py` — **43/43 tests pass** covering Driver core, Account (MR-07A regression), Owner master, Vehicle master, Equipment master, Driver↔Vehicle assignment, Vehicle↔Equipment coupling, Compliance record write, Notification reopen, Numbering (write / audit / sequence), Activation, Admin/Settings, Document review workflow, Document metadata sensitivity gate.
+
+### Regression results
+- MR-07B: **43/43 pass** (new suite)
+- MR-07A: **27/27 pass** (one test updated to reflect MR-07B)
+- MR-04B (surgical + gate + page-gate): **all pass** (81/81 combined in wider re-run)
+- MR-05 (relationships + carrier/owner fix): **all pass**
+- MR-06 (base + Urgent fix): **17/17 pass**
+- MR-08A (numbering + fixes): **all pass**
+
+### STOP items resolved
+- **Vehicle↔Equipment coupling** — treated as master physical configuration (Prime Mover ↔ Tray/Trailer). Admin/Manager only, as owner spec permits when the workflow is master rather than temporary allocation.
+- **Document review** — canonical schema `DocumentStatus` already supported `Active/UnderReview/Rejected`. Added minimal reviewer metadata fields (`reviewed_by/at/note/decision`) on the document doc — Mongo schemaless; no migration. No new workflow engine.
+
+### Confirmations
+staging only · main untouched · Production untouched · no real ACE data migrated · no Accounts role added · MR-07A financial protection unchanged · MR-04 activation logic unchanged · MR-05 relationship business logic unchanged · MR-06 notification lifecycle unchanged · MR-08A numbering logic unchanged · backend is enforcement authority · frontend mirrors backend · no out-of-scope changes.
+
+**FUNCTIONAL CONFORMANCE: PASS**
+**VISUAL & INTERACTION CONFORMANCE: PASS (frontend gates realigned; card layouts unchanged)**

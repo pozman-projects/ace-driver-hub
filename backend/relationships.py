@@ -223,8 +223,28 @@ def _today() -> str:
 
 
 def _require_write(user):
+    # MR-07B (backwards-compatible fallback) · ReadOnly cannot mutate.
     if user.get("role") == "ReadOnly":
         raise HTTPException(status_code=403, detail="ReadOnly role cannot create or update")
+
+
+def _require_master_relationship_write(user, label: str):
+    """MR-07B · Driver↔Owner and Vehicle↔Equipment are Admin/Manager only."""
+    if user.get("role") not in {"Admin", "Manager"}:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only Admin or Manager may modify {label}",
+        )
+
+
+def _require_allocation_write(user, label: str):
+    """MR-07B · Driver↔Vehicle and Driver↔Equipment are allocation actions
+    (Admin/Manager/Allocator). Compliance and ReadOnly are denied."""
+    if user.get("role") not in {"Admin", "Manager", "Allocator"}:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only Admin, Manager or Allocator may modify {label}",
+        )
 
 
 def _require_archive(user):
@@ -942,12 +962,12 @@ def build_relationships_router(db, get_current_user):
 
     @router.post("/driver-owner-relationships", response_model=DriverOwnerRead)
     async def create_dor(payload: DriverOwnerCreate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_master_relationship_write(current, "Driver↔Owner relationships")
         return await svc.create_driver_owner(payload, current.get("email"))
 
     @router.put("/driver-owner-relationships/{rid}", response_model=DriverOwnerRead)
     async def update_dor(rid: str, payload: DriverOwnerUpdate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_master_relationship_write(current, "Driver↔Owner relationships")
         existing = await db[DOR_COLL].find_one({"id": rid}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
@@ -1016,17 +1036,17 @@ def build_relationships_router(db, get_current_user):
 
     @router.post("/driver-vehicle-assignments", response_model=DriverVehicleRead)
     async def create_dva(payload: DriverVehicleCreate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_allocation_write(current, "Driver↔Vehicle assignments")
         return await svc.create_driver_vehicle(payload, current.get("email"))
 
     @router.post("/driver-vehicle-assignments/reassign", response_model=DriverVehicleRead)
     async def reassign_dva(body: VehicleReassignBody, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_allocation_write(current, "Driver↔Vehicle assignments")
         return await svc.reassign_vehicle(body, current.get("email"))
 
     @router.put("/driver-vehicle-assignments/{aid}", response_model=DriverVehicleRead)
     async def update_dva(aid: str, payload: DriverVehicleUpdate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_allocation_write(current, "Driver↔Vehicle assignments")
         existing = await db[DVA_COLL].find_one({"id": aid}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
@@ -1097,17 +1117,17 @@ def build_relationships_router(db, get_current_user):
 
     @router.post("/driver-equipment-assignments", response_model=DriverEquipmentRead)
     async def create_dea(payload: DriverEquipmentCreate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_allocation_write(current, "Driver↔Equipment assignments")
         return await svc.create_driver_equipment(payload, current.get("email"), allow_conflict_close=False)
 
     @router.post("/driver-equipment-assignments/reassign", response_model=DriverEquipmentRead)
     async def reassign_dea(body: EquipmentReassignBody, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_allocation_write(current, "Driver↔Equipment assignments")
         return await svc.reassign_equipment(body, current.get("email"))
 
     @router.put("/driver-equipment-assignments/{aid}", response_model=DriverEquipmentRead)
     async def update_dea(aid: str, payload: DriverEquipmentUpdate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_allocation_write(current, "Driver↔Equipment assignments")
         existing = await db[DEA_COLL].find_one({"id": aid}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")
@@ -1185,17 +1205,17 @@ def build_relationships_router(db, get_current_user):
 
     @router.post("/vehicle-equipment-couplings", response_model=VehicleEquipmentCouplingRead)
     async def create_vec(payload: VehicleEquipmentCouplingCreate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_master_relationship_write(current, "Vehicle↔Equipment coupling")
         return await svc.create_vehicle_equipment_coupling(payload, current.get("email"), allow_conflict_close=False)
 
     @router.post("/vehicle-equipment-couplings/reassign", response_model=VehicleEquipmentCouplingRead)
     async def reassign_vec(body: VehicleEquipmentReassignBody, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_master_relationship_write(current, "Vehicle↔Equipment coupling")
         return await svc.reassign_vehicle_equipment(body, current.get("email"))
 
     @router.put("/vehicle-equipment-couplings/{cid}", response_model=VehicleEquipmentCouplingRead)
     async def update_vec(cid: str, payload: VehicleEquipmentCouplingUpdate, current=Depends(get_current_user)):
-        _require_write(current)
+        _require_master_relationship_write(current, "Vehicle↔Equipment coupling")
         existing = await db[VEC_COLL].find_one({"id": cid}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Not found")

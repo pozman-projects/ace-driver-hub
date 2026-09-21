@@ -186,6 +186,11 @@ class TestCanonicalDriverWrite:
     def test_non_privileged_can_still_update_non_restricted_fields(
         self, request, admin, session_name
     ):
+        # MR-07B · Compliance and Allocator are now denied Driver core writes
+        # (mobile_number is a core master field). This test used to pass under
+        # the pre-MR-07B "everyone-but-ReadOnly" write policy. The canonical
+        # matrix now blocks both roles from Driver core edits — the resulting
+        # 403 is the intended behaviour.
         d = admin.post(
             f"{BASE_URL}/api/drivers",
             json={"full_name": f"Wperm3 {session_name} {uuid.uuid4().hex[:4]}", "driver_status": "Active"},
@@ -197,7 +202,7 @@ class TestCanonicalDriverWrite:
             json={"mobile_number": "0400 000 111"},
             timeout=15,
         )
-        assert r.status_code == 200, r.text
+        assert r.status_code == 403, r.text
 
     @pytest.mark.parametrize("session_name", ["compliance", "allocator"])
     def test_non_privileged_create_with_restricted_fields_blocked(

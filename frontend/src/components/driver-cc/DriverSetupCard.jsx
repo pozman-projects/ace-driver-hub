@@ -27,11 +27,11 @@ import { Link } from "react-router-dom";
 import { CaretRight, ArrowsClockwise } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../../lib/api";
-import { ROLE_CAN_EDIT, ManagementCard, InlineField, EditInput } from "./driverCCUtils";
+import { ROLE_CAN_EDIT_SETUP, ManagementCard, InlineField, EditInput } from "./driverCCUtils";
 
 export default function DriverSetupCard({ data, role, onSaved }) {
   const d = data.driver || {};
-  const canEdit = ROLE_CAN_EDIT.has(role);
+  const canEdit = ROLE_CAN_EDIT_SETUP.has(role);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);

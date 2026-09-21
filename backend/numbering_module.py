@@ -916,7 +916,9 @@ def build_numbering_router(db, get_current_user):
     svc = NumberingService(db)
 
     WRITE_ROLES = ("Admin", "Manager", "Allocator")
-    READ_ROLES = ("Admin", "Manager", "Compliance", "Allocator")
+    # MR-07B · Operational numbering reads are Admin/Manager/Allocator.
+    # Compliance is denied numbering surfaces entirely.
+    READ_ROLES = ("Admin", "Manager", "Allocator")
 
     # ------------- Driver Code
     @router.get("/numbering/driver-code/suggestion")
@@ -1032,7 +1034,8 @@ def build_numbering_router(db, get_current_user):
     @router.get("/numbering/dispatch/reservations")
     async def dispatch_reservations(only_active: bool = True,
                                        current=Depends(get_current_user)):
-        _require_role(current, READ_ROLES)
+        # MR-07B · Numbering pool/audit view = Admin / Manager.
+        _require_role(current, ("Admin", "Manager"))
         return await svc.list_reservations(only_active=only_active)
 
     # ------------- History
@@ -1040,7 +1043,8 @@ def build_numbering_router(db, get_current_user):
     async def list_events(identifier_type: Optional[str] = None,
                            driver_id: Optional[str] = None,
                            current=Depends(get_current_user)):
-        _require_role(current, READ_ROLES)
+        # MR-07B · Audit history = Admin / Manager.
+        _require_role(current, ("Admin", "Manager"))
         q: Dict[str, Any] = {}
         if identifier_type:
             q["identifier_type"] = identifier_type
@@ -1051,7 +1055,8 @@ def build_numbering_router(db, get_current_user):
 
     @router.get("/numbering/drivers/{driver_id}/history")
     async def driver_history(driver_id: str, current=Depends(get_current_user)):
-        _require_role(current, READ_ROLES)
+        # MR-07B · Per-driver numbering history = Admin / Manager.
+        _require_role(current, ("Admin", "Manager"))
         rows = await db[EVENTS_COLL].find({"driver_id": driver_id}, {"_id": 0}) \
             .sort("performed_at", -1).to_list(500)
         return rows

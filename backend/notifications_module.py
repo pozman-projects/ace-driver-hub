@@ -2015,7 +2015,7 @@ def build_notifications_router(db, get_current_user):
 
     @router.post("/notifications/{notification_id}/reopen")
     async def reopen_route(notification_id: str, current=Depends(get_current_user)):
-        _require_role(current, ("Admin", "Manager"))
+        _require_role(current, ("Admin", "Manager", "Compliance"))
         return await engine.reopen(notification_id, current)
 
     @router.delete("/notifications/{notification_id}")

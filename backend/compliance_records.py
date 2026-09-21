@@ -232,8 +232,16 @@ def _worst_vc(component_statuses: List[str]) -> str:
 
 
 def _require_write(user):
-    if user.get("role") == "ReadOnly":
+    # MR-07B · Compliance evidence writes are Admin / Manager / Compliance.
+    # Allocator and ReadOnly are denied.
+    role = user.get("role")
+    if role == "ReadOnly":
         raise HTTPException(status_code=403, detail="ReadOnly role cannot create or update")
+    if role not in {"Admin", "Manager", "Compliance"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admin, Manager or Compliance may edit compliance records",
+        )
 
 
 def _require_archive(user):

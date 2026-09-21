@@ -1,5 +1,5 @@
 import React from "react";
-import { RightCard, StatusPill, InlineField, ROLE_CAN_EDIT } from "./driverCCUtils";
+import { RightCard, StatusPill, InlineField, ROLE_CAN_EDIT_COMPLIANCE } from "./driverCCUtils";
 import EvidenceActions from "./EvidenceActions";
 
 export default function TruckRegistrationCard({ data, role, onSaved }) {
@@ -7,7 +7,7 @@ export default function TruckRegistrationCard({ data, role, onSaved }) {
   const vs = data.compliance_intelligence?.vehicle_summary;
   const s = (vs?.components || []).find((c) => c.component === "registration");
   const evidence = data.documents?.registration_evidence || null;
-  const canEdit = ROLE_CAN_EDIT.has(role);
+  const canEdit = ROLE_CAN_EDIT_COMPLIANCE.has(role);
   return (
     <RightCard title="Truck Registration" testid="ci-registration" section="registration">
       {r ? (

@@ -785,6 +785,14 @@ def build_documents_router(db, get_current_user):
     async def update_document(document_id: str, payload: dict, current=Depends(get_current_user)):
         _require_write(current)
         existing = await _projected_doc(document_id)
+        # MR-07B · metadata edit is gated by sensitivity + role.
+        from role_matrix import can_edit_document_metadata
+        sensitivity = existing.get("sensitivity", Sensitivity.Standard.value)
+        if not can_edit_document_metadata(current, sensitivity):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Role not permitted to edit metadata for {sensitivity} document",
+            )
         allowed = {"title", "description", "category", "sensitivity", "status", "document_type"}
         updates = {k: v for k, v in (payload or {}).items() if k in allowed}
         if not updates:
@@ -793,6 +801,12 @@ def build_documents_router(db, get_current_user):
         if "sensitivity" in updates:
             if not _visible_by_sensitivity(current.get("role", ""), existing.get("sensitivity", Sensitivity.Standard.value)):
                 raise HTTPException(status_code=403, detail="Cannot alter sensitivity without permission")
+            # Also require caller be permitted to edit the NEW sensitivity tier.
+            if not can_edit_document_metadata(current, updates["sensitivity"]):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Role not permitted to move document to {updates['sensitivity']}",
+                )
         updates["updated_at"] = _iso()
         updates["updated_by"] = current.get("email")
         await db[DOCUMENTS_COLL].update_one({"id": document_id}, {"$set": updates})
@@ -1075,6 +1089,48 @@ def build_documents_router(db, get_current_user):
                 "signature_status": new_status,
                 "signed_at": signed_at,
                 "signed_by": current.get("email") if new_status == "Signed" else None,
+                "updated_at": _iso(),
+                "updated_by": current.get("email"),
+            }},
+        )
+        updated = await db[DOCUMENTS_COLL].find_one({"id": document_id}, {"_id": 0})
+        return _strip_storage(updated)
+
+    # MR-07B · Minimal canonical document review lifecycle.
+    # POST /api/documents/{id}/review with {"decision": "approve" | "reject",
+    # "note": "..."} moves the document status to Active (approve) or
+    # Rejected (reject) and records reviewer + reviewed_at. Role gate is
+    # sensitivity-aware via `can_review_document`.
+    @router.post("/documents/{document_id}/review")
+    async def review_document(document_id: str, payload: dict,
+                              current=Depends(get_current_user)):
+        from role_matrix import can_review_document
+        doc = await db[DOCUMENTS_COLL].find_one({"id": document_id}, {"_id": 0})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.get("is_archived"):
+            raise HTTPException(status_code=410, detail="Document archived")
+        sensitivity = doc.get("sensitivity", Sensitivity.Standard.value)
+        if not can_review_document(current, sensitivity):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Role not permitted to review {sensitivity} document",
+            )
+        decision = (payload or {}).get("decision")
+        if decision not in ("approve", "reject"):
+            raise HTTPException(status_code=400,
+                                detail="decision must be 'approve' or 'reject'")
+        new_status = (DocumentStatus.Active.value if decision == "approve"
+                      else DocumentStatus.Rejected.value)
+        note = (payload or {}).get("note")
+        await db[DOCUMENTS_COLL].update_one(
+            {"id": document_id},
+            {"$set": {
+                "status": new_status,
+                "reviewed_at": _iso(),
+                "reviewed_by": current.get("email"),
+                "review_note": note,
+                "review_decision": decision,
                 "updated_at": _iso(),
                 "updated_by": current.get("email"),
             }},

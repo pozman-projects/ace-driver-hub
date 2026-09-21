@@ -397,8 +397,31 @@ async def _ensure_owner_exists(db, owner_id: Optional[str]):
 
 
 def _require_write_role(user):
+    # MR-07B (backwards-compatible for any legacy callers) · ReadOnly cannot mutate.
     if user.get("role") == "ReadOnly":
         raise HTTPException(status_code=403, detail="ReadOnly role cannot create or update")
+
+
+def _require_master_write(user, resource_label: str = "master data"):
+    """MR-07B · master-data create/edit is Admin / Manager only."""
+    from role_matrix import CAN_EDIT_DRIVER_CORE  # same set for all master data
+    if user.get("role") not in CAN_EDIT_DRIVER_CORE:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only Admin or Manager may create or edit {resource_label}",
+        )
+
+
+def _require_driver_setup_write(user):
+    """MR-07B · Allocator may edit Driver setup fields (Training/Probation/
+    On Leave/Inactive). Compliance denied. ReadOnly denied. Active
+    transitions remain gated by MR-04 in update_driver."""
+    from role_matrix import CAN_EDIT_DRIVER_SETUP
+    if user.get("role") not in CAN_EDIT_DRIVER_SETUP:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admin, Manager or Allocator may edit Driver setup",
+        )
 
 
 def _require_delete_role(user):
@@ -699,9 +722,23 @@ def build_registers_router(db, get_current_user):
         # MR-07A · Strip sensitive account fields for non-account roles.
         return strip_driver_account_fields(doc, current)
 
+    # MR-07B · Driver PUT accepts two operation classes:
+    #   • CORE (Admin/Manager): any master identity/contact/account field
+    #   • SETUP (Admin/Manager/Allocator): driver_status (not→Active),
+    #     start_date, driver_code, dispatch_number
+    # Anything not in the SETUP set is CORE.
+    _DRIVER_SETUP_FIELDS = frozenset({
+        "driver_status", "start_date", "driver_code", "dispatch_number",
+    })
+
+    def _classify_driver_write(supplied_keys):
+        core = [k for k in supplied_keys if k not in _DRIVER_SETUP_FIELDS]
+        return core, [k for k in supplied_keys if k in _DRIVER_SETUP_FIELDS]
+
     @router.post("/drivers", response_model=DriverRead)
     async def create_driver(payload: DriverCreate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        # MR-07B · Driver create is Admin / Manager only (core master data).
+        _require_master_write(current, "a Driver")
         # MR-07A · Reject account-field writes by non-account roles.
         from permissions import enforce_driver_account_write, strip_driver_account_fields
         enforce_driver_account_write(
@@ -733,10 +770,23 @@ def build_registers_router(db, get_current_user):
 
     @router.put("/drivers/{driver_id}", response_model=DriverRead)
     async def update_driver(driver_id: str, payload: DriverUpdate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        # MR-07B · Role gate depends on which class of fields is being written.
         from permissions import enforce_driver_account_write, strip_driver_account_fields
+        supplied_keys = list(payload.model_dump(exclude_unset=True).keys())
+        core_keys, _setup_keys = _classify_driver_write(supplied_keys)
+        role = current.get("role")
+        if role == "ReadOnly":
+            raise HTTPException(status_code=403, detail="ReadOnly cannot update Driver")
+        if role == "Compliance":
+            raise HTTPException(
+                status_code=403,
+                detail="Compliance role cannot edit Driver core or setup",
+            )
+        if core_keys:
+            _require_master_write(current, "Driver core fields")
+        else:
+            _require_driver_setup_write(current)
         # MR-07A · Reject account-field writes by non-account roles.
-        supplied_keys = payload.model_dump(exclude_unset=True).keys()
         enforce_driver_account_write(supplied_keys, current)
         existing = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0})
         if not existing:
@@ -890,7 +940,7 @@ def build_registers_router(db, get_current_user):
 
     @router.post("/owners", response_model=OwnerRead)
     async def create_owner(payload: OwnerCreate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        _require_master_write(current, "an Owner")
         now = _iso_now()
         doc = payload.model_dump()
         doc.update(
@@ -909,7 +959,7 @@ def build_registers_router(db, get_current_user):
 
     @router.put("/owners/{owner_id}", response_model=OwnerRead)
     async def update_owner(owner_id: str, payload: OwnerUpdate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        _require_master_write(current, "an Owner")
         existing = await db[OWNERS_COLL].find_one({"id": owner_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Owner not found")
@@ -952,7 +1002,7 @@ def build_registers_router(db, get_current_user):
 
     @router.post("/vehicles", response_model=VehicleRead)
     async def create_vehicle(payload: VehicleCreate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        _require_master_write(current, "a Vehicle")
         await _ensure_unique(db, VEHICLES_COLL, "registration_number", payload.registration_number)
         await _ensure_unique(db, VEHICLES_COLL, "vin", payload.vin)
         await _ensure_owner_exists(db, payload.owner_id)
@@ -974,7 +1024,7 @@ def build_registers_router(db, get_current_user):
 
     @router.put("/vehicles/{vehicle_id}", response_model=VehicleRead)
     async def update_vehicle(vehicle_id: str, payload: VehicleUpdate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        _require_master_write(current, "a Vehicle")
         existing = await db[VEHICLES_COLL].find_one({"id": vehicle_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Vehicle not found")
@@ -1024,7 +1074,7 @@ def build_registers_router(db, get_current_user):
 
     @router.post("/equipment", response_model=EquipmentRead)
     async def create_equipment(payload: EquipmentCreate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        _require_master_write(current, "Equipment")
         await _ensure_unique(db, EQUIPMENT_COLL, "equipment_number", payload.equipment_number)
         await _ensure_owner_exists(db, payload.owner_id)
         now = _iso_now()
@@ -1045,7 +1095,7 @@ def build_registers_router(db, get_current_user):
 
     @router.put("/equipment/{equipment_id}", response_model=EquipmentRead)
     async def update_equipment(equipment_id: str, payload: EquipmentUpdate, current=Depends(get_current_user)):
-        _require_write_role(current)
+        _require_master_write(current, "Equipment")
         existing = await db[EQUIPMENT_COLL].find_one({"id": equipment_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Equipment not found")

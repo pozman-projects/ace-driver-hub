@@ -84,6 +84,10 @@ export default function DriverNotesCard({ data, role, driverId, onChanged }) {
                     {n.is_pinned && <PushPin size={10} weight="fill" className="text-amber-500" />}
                     <span>{n.note_type}</span>
                     <span>· {new Date(n.updated_at).toLocaleDateString()}</span>
+                    <span>·</span>
+                    <span className="normal-case tracking-normal truncate" data-testid={`note-author-${n.driver_note_id}`}>
+                      {n.updated_by || n.created_by || "System"}
+                    </span>
                   </div>
                   {n.title && <div className="text-xs font-semibold text-slate-900">{n.title}</div>}
                   <div className="text-xs text-slate-700 line-clamp-2">{n.content}</div>

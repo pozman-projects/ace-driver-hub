@@ -36,6 +36,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 COMMS_COLL = "driver_communication_preferences"
+COMM_HISTORY_COLL = "driver_communication_preference_events"
+
+import logging  # noqa: E402
+logger = logging.getLogger(__name__)
 NOTES_COLL = "driver_notes"
 NOTE_VERSIONS_COLL = "driver_note_versions"
 
@@ -132,6 +136,7 @@ class NoteUpdatePayload(BaseModel):
 async def ensure_indexes(db):
     await db[COMMS_COLL].create_index("communication_preference_id", unique=True)
     await db[COMMS_COLL].create_index("driver_id")
+    await db[COMM_HISTORY_COLL].create_index([("driver_id", 1), ("changed_at", -1)])
     await db[NOTES_COLL].create_index("driver_note_id", unique=True)
     await db[NOTES_COLL].create_index([("driver_id", 1), ("is_archived", 1), ("is_pinned", -1), ("updated_at", -1)])
     await db[NOTE_VERSIONS_COLL].create_index("driver_note_version_id", unique=True)
@@ -211,8 +216,33 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
     # -- Relationships ----------------------------------------------------------
     dor = await db[DOR_COLL].find_one({"driver_id": driver_id, "is_current": True, "is_archived": {"$ne": True}}, {"_id": 0})
     owner = None
+    other_drivers_for_owner: List[Dict[str, Any]] = []
     if dor and dor.get("owner_id"):
         owner = await db[OWNERS_COLL].find_one({"id": dor["owner_id"]}, {"_id": 0})
+        # FA-02 · Same-Owner Driver visibility. Read-only. No preference
+        # coupling. Excludes current driver + archived drivers + non-current
+        # relationships. Returns compact identity only.
+        peer_dors = await db[DOR_COLL].find(
+            {
+                "owner_id": dor["owner_id"],
+                "is_current": True,
+                "is_archived": {"$ne": True},
+                "driver_id": {"$ne": driver_id},
+            },
+            {"_id": 0, "driver_id": 1},
+        ).to_list(200)
+        peer_ids = [d["driver_id"] for d in peer_dors]
+        if peer_ids:
+            peers = await db[DRIVERS_COLL].find(
+                {
+                    "id": {"$in": peer_ids},
+                    "is_archived": {"$ne": True},
+                    "driver_status": {"$ne": "Archived"},
+                },
+                {"_id": 0, "id": 1, "full_name": 1, "driver_code": 1,
+                 "dispatch_number": 1, "driver_status": 1},
+            ).to_list(200)
+            other_drivers_for_owner = sorted(peers, key=lambda p: p.get("full_name") or "")
 
     dva = await db[DVA_COLL].find_one({"driver_id": driver_id, "is_active": True, "is_primary": True, "is_archived": {"$ne": True}}, {"_id": 0})
     vehicle = None
@@ -555,6 +585,10 @@ async def _aggregate_driver(db, driver_id: str, role: str) -> Dict[str, Any]:
         "trailer_equipment": trailer_equipment,
         "equipment_assignments": equipment_assignments,
         "communication_preferences": comms,
+        "communication_history": await db[COMM_HISTORY_COLL].find(
+            {"driver_id": driver_id}, {"_id": 0},
+        ).sort("changed_at", -1).to_list(5),
+        "other_drivers_for_owner": other_drivers_for_owner,
         "compliance_intelligence": compliance_intelligence,
         "primary_licence": primary_licence,
         "primary_registration": primary_registration,
@@ -652,28 +686,78 @@ def build_driver_profile_router(db, get_current_user):
         now = _iso()
         data = payload.model_dump()
         existing = await db[COMMS_COLL].find_one({"driver_id": driver_id, "is_archived": {"$ne": True}}, {"_id": 0})
+        # FA-02 · Canonical audit history — only the five communication
+        # preference fields are tracked. No unrelated driver data.
+        tracked = ("owner_report_email_override", "driver_report_email_override",
+                    "send_daily_report_owner", "send_daily_report_driver",
+                    "display_on_dispatch")
+        # Canonical defaults mirror CommsPreferencesPayload. On a first-save
+        # any explicit deviation from the default is a real preference
+        # change and MUST be recorded.
+        DEFAULTS = {
+            "owner_report_email_override": None,
+            "driver_report_email_override": None,
+            "send_daily_report_owner": False,
+            "send_daily_report_driver": False,
+            "display_on_dispatch": True,
+        }
+        before = {k: (existing[k] if existing and k in existing else DEFAULTS[k]) for k in tracked}
+        after = {k: data.get(k) for k in tracked}
+        changed_fields = [k for k in tracked if before[k] != after[k]]
         if existing:
             await db[COMMS_COLL].update_one(
                 {"communication_preference_id": existing["communication_preference_id"]},
                 {"$set": {**data, "updated_at": now, "updated_by": current["email"]}},
             )
-            return await db[COMMS_COLL].find_one(
+            result = await db[COMMS_COLL].find_one(
                 {"communication_preference_id": existing["communication_preference_id"]},
                 {"_id": 0},
             )
-        doc = {
-            "communication_preference_id": _uuid(),
-            "driver_id": driver_id,
-            **data,
-            "created_at": now,
-            "updated_at": now,
-            "created_by": current["email"],
-            "updated_by": current["email"],
-            "is_archived": False,
-        }
-        await db[COMMS_COLL].insert_one(doc)
-        doc.pop("_id", None)
-        return doc
+        else:
+            doc = {
+                "communication_preference_id": _uuid(),
+                "driver_id": driver_id,
+                **data,
+                "created_at": now,
+                "updated_at": now,
+                "created_by": current["email"],
+                "updated_by": current["email"],
+                "is_archived": False,
+            }
+            await db[COMMS_COLL].insert_one(doc)
+            doc.pop("_id", None)
+            result = doc
+        # Append one history event iff meaningful change occurred. No-op
+        # saves do not create noise. Preference write is the canonical
+        # authority; a history append failure is logged but must not roll
+        # back the successful preference change (no distributed transaction).
+        if changed_fields:
+            try:
+                await db[COMM_HISTORY_COLL].insert_one({
+                    "id": _uuid(),
+                    "driver_id": driver_id,
+                    "changed_at": now,
+                    "changed_by": current.get("email") or "system",
+                    "before": before,
+                    "after": after,
+                    "changed_fields": changed_fields,
+                })
+            except Exception:
+                logger.exception("communication_history_append_failed",
+                                  extra={"driver_id": driver_id})
+        return result
+
+    @router.get("/drivers/{driver_id}/communication-preferences/history")
+    async def get_comms_history(driver_id: str, limit: int = 20,
+                                  current=Depends(get_current_user)):
+        driver = await db[DRIVERS_COLL].find_one({"id": driver_id}, {"_id": 0, "id": 1})
+        if not driver:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        limit = max(1, min(int(limit or 20), 100))
+        rows = await db[COMM_HISTORY_COLL].find(
+            {"driver_id": driver_id}, {"_id": 0},
+        ).sort("changed_at", -1).to_list(limit)
+        return {"events": rows}
 
     # ---- Notes ------------------------------------------------------------
     def _can_read_category(role: str, category: str) -> bool:

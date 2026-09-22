@@ -50,22 +50,27 @@ export default function TruckInsuranceCard({ data, role, onSaved }) {
         <div className="pt-1">
           <StatusPill status={insuranceComp?.status || "Compliant"} compact testid="ci-insurance-status" />
         </div>
-        <EvidenceActions
-          evidenceDoc={evidence}
-          canEdit={canEdit}
-          acceptHint=".pdf,image/*"
-          uploadPayload={{
-            title: `Vehicle Insurance — ${i.policy_number || i.id}`,
-            document_type: "Vehicle Insurance",
-            entity_type: "VehicleInsurancePolicy",
-            entity_id: i.id,
-            relationship_type: "Evidence",
-            is_primary: "true",
-            sensitivity: "Standard",
-          }}
-          onChanged={onSaved}
-          testidPrefix="ci-insurance-ev"
-        />
+        <div className="mt-3 pt-3 border-t border-slate-200" data-testid="ci-insurance-evidence-group">
+          <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-1.5" data-testid="ci-insurance-evidence-label">
+            Evidence
+          </div>
+          <EvidenceActions
+            evidenceDoc={evidence}
+            canEdit={canEdit}
+            acceptHint=".pdf,image/*"
+            uploadPayload={{
+              title: `Vehicle Insurance — ${i.policy_number || i.id}`,
+              document_type: "Vehicle Insurance",
+              entity_type: "VehicleInsurancePolicy",
+              entity_id: i.id,
+              relationship_type: "Evidence",
+              is_primary: "true",
+              sensitivity: "Standard",
+            }}
+            onChanged={onSaved}
+            testidPrefix="ci-insurance-ev"
+          />
+        </div>
       </RightCard>
     );
   }

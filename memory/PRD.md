@@ -4,7 +4,7 @@
 Execute strict "NO-DRIFT" Remediation Packages to bring the application into
 absolute alignment with Blueprint V1 and the approved Dan Murgo mock-up.
 
-## Latest Increment · FA-04 (Feb 2026) · Truck Insurance N/A presentation
+## Latest Increment · FA-04 (Sep 2026) · Truck Insurance N/A presentation
 - **Truck Insurance card** now distinguishes three canonical states:
   - Case A · no primary vehicle → `Not Applicable` pill + reason
     "No primary vehicle assigned" + helper "Truck Insurance will be

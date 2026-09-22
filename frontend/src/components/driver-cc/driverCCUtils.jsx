@@ -198,7 +198,7 @@ export function HeaderBadge({ label, value, variant = "neutral", testid, linkTo 
     neutral: "border-slate-200 bg-white text-slate-800",
   }[variant];
   const Inner = (
-    <div className={`rounded-lg border ${cls} px-3 py-1.5 min-w-[130px]`} data-testid={testid}>
+    <div className={`rounded-lg border ${cls} px-3 py-1.5 sm:min-w-[130px]`} data-testid={testid}>
       <div className="text-[9px] uppercase tracking-[0.2em] opacity-80">{label}</div>
       <div className="text-sm font-semibold">{value}</div>
     </div>

@@ -88,7 +88,7 @@ function CommandCentreInner({ driverId, sectionAnchor }) {
     <div className="min-h-screen bg-slate-50" data-testid="driver-command-centre">
       <AppHeader showBack />
 
-      <main className="w-full px-4 lg:px-8 py-6 mx-auto" style={{ maxWidth: 1920 }}>
+      <main className="w-full max-w-[1920px] px-4 lg:px-8 py-6 mx-auto">
         <DriverCCHeader driver={driver} data={data} loading={loading} driverId={driverId} />
 
         {failed && <DriverCCErrorState onRetry={refresh} />}

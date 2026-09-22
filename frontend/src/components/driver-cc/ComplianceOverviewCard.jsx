@@ -13,8 +13,12 @@ export default function ComplianceOverviewCard({ data, driverId }) {
     ...(ci.driver_summary?.components || []),
     ...(ci.vehicle_summary?.components || []),
   ];
-  const total = components.length;
-  const compliantCount = components.filter((c) => c.status === "Compliant").length;
+  // FA-04 · Denominator excludes canonically Not Applicable components so
+  // "n of n Compliant" remains truthful. Reuses backend canonical status —
+  // no frontend calculator, no invented N/A.
+  const applicable = components.filter((c) => c.status !== "Not Applicable");
+  const total = applicable.length;
+  const compliantCount = applicable.filter((c) => c.status === "Compliant").length;
   const worst = ci.worst_status || "Compliant";
   return (
     <RightCard title="Compliance Overview" testid="ci-overview" section="ci-overview">

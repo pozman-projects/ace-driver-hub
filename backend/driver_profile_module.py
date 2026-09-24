@@ -625,11 +625,38 @@ async def _compute_activation_summary(
     is preserved only as a thin passthrough for callers that used to depend on
     its shape; it now returns the canonical seven-item Blueprint V1 result.
 
+    PR-02 · Additive legacy-compatibility layer.
+    The canonical payload uses ``items[i].key`` and ``items[i].reason``.
+    Some historical consumers (and the eb09 shape contract test) expect
+    ``item_key`` + ``source`` plus a top-level ``mandatory_total``. We add
+    those fields alongside the canonical ones (no canonical field removed,
+    no readiness logic touched, no new blockers, no new exemptions).
+
     Old parameters (primary_licence/dor/dva/contract/comms) are ignored — the
     canonical engine reads them directly from the source-of-truth collections.
     """
     from activation_module import blueprint_v1_readiness as _bp_readiness
-    return await _bp_readiness(db, driver["id"])
+    result = await _bp_readiness(db, driver["id"])
+
+    # ── Legacy item_key aliases (identity except licence) ────────────────
+    # MR-04B renamed the licence key from "primary_licence" → "driver_licence".
+    # Historical consumers still look up by the legacy value. Alias only,
+    # canonical `key` is preserved.
+    _LEGACY_ITEM_KEY = {
+        "driver_licence": "primary_licence",
+    }
+    items = result.get("items") or []
+    for it in items:
+        canonical_key = it.get("key")
+        it.setdefault("item_key", _LEGACY_ITEM_KEY.get(canonical_key, canonical_key))
+        # Legacy "source" mirrors "reason" but must contain lowercase
+        # "canonical" for a Complete item so the historical contract test
+        # can detect canonical provenance. The canonical `reason` is kept
+        # capitalised for UI display.
+        reason = it.get("reason") or ""
+        it.setdefault("source", reason.replace("Canonical compliance", "canonical compliance", 1))
+    result["mandatory_total"] = sum(1 for it in items if it.get("mandatory"))
+    return result
 
 
 # ─── Router builder ───────────────────────────────────────────────────────────

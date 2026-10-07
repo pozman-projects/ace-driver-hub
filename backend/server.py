@@ -521,15 +521,23 @@ async def on_startup():
     for coll in MODULE_COLLECTIONS.values():
         await db[coll].create_index("id", unique=True)
     await seed_admin()
-    await seed_sample_data()
-    await backfill_driver_ids()
+    # PR-03-FIX-01C · Production seed-safety gate.
+    # Demo / sample / blueprint-trio enrichment and EB-02/EB-03 seed-eb02
+    # fixtures must NOT run in Production. Preview / Test / dev behaviour
+    # is unchanged. No other startup hook, migration or reconciliation is
+    # affected by this gate.
+    _is_production = os.environ.get("APP_ENV", "").lower() == "production"
+    if not _is_production:
+        await seed_sample_data()
+        await backfill_driver_ids()
     # --- EB-02 Foundation Registers ---
     from registers import ensure_indexes, migrate_existing_drivers, seed_registers, reconcile_vehicle_lifecycle
     await ensure_indexes(db)
     await migrate_existing_drivers(db)
     # EB-R02C · Reconcile Vehicle lifecycle to canonical enum (idempotent).
     await reconcile_vehicle_lifecycle(db)
-    await seed_registers(db)
+    if not _is_production:
+        await seed_registers(db)
     # --- EB-03 Relationships & Assignments ---
     from relationships import (
         ensure_indexes as rel_ensure_indexes,
@@ -537,7 +545,8 @@ async def on_startup():
         startup_reconciliation,
     )
     await rel_ensure_indexes(db)
-    await seed_relationships(db)
+    if not _is_production:
+        await seed_relationships(db)
     await startup_reconciliation(db)
     # --- EB-04 Canonical Compliance Foundation ---
     from compliance_records import (
